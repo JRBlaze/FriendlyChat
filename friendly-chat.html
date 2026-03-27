@@ -1084,6 +1084,9 @@ function connectTwitch(channel) {
 
       if(raw.includes('End of /NAMES list')) {
         addSys(`Connected to Twitch: ${channel}`);
+        // Fetch recent chat history from the robotty recent-messages service
+        // (same service used by Chatterino2)
+        fetchTwitchHistory(channel);
         // Fetch 7TV/BTTV global emotes immediately
         fetchThirdPartyEmotes('twitch', channel, S.twitchUserId || null);
         // Fetch broadcaster ID then pull global + channel emotes
@@ -1211,6 +1214,8 @@ function connectKick(channel) {
             data: { auth: '', channel: `chatrooms.${chatroomId}.v2` }
           }));
           addSys(`Connected to Kick: ${channel}`);
+          // Fetch recent chat history
+          fetchKickHistory(chatroomId);
           return;
         }
         if(msg.event !== 'App\\Events\\ChatMessageEvent') return;
@@ -1271,6 +1276,62 @@ function parseYouTubeVideoId(input) {
     // Not a URL — use as-is (bare video ID)
   }
   return videoId.split('&')[0].split('?')[0].trim();
+}
+
+async function fetchTwitchHistory(channel) {
+  try {
+    const r = await fetch(`https://recent-messages.robotty.de/api/v2/recent-messages/${channel}?limit=50`);
+    if(!r.ok) return;
+    const data = await r.json();
+    const messages = data.messages || [];
+    if(!messages.length) return;
+    addSys('Loading Twitch chat history...');
+    messages.forEach(raw => {
+      // Each entry is a raw IRC line — parse it the same way the WebSocket does
+      if(!raw.includes('PRIVMSG')) return;
+      // Parse tags
+      const tags = {};
+      const tagMatch = raw.match(/^@([^ ]+)/);
+      if(tagMatch) {
+        tagMatch[1].split(';').forEach(part => {
+          const eq = part.indexOf('=');
+          if(eq !== -1) tags[part.slice(0, eq)] = part.slice(eq + 1);
+        });
+      }
+      // Parse author and message text
+      const msgMatch = raw.match(/PRIVMSG #\S+ :(.+)$/);
+      const nickMatch = raw.match(/!([^@]+)@/);
+      if(!msgMatch || !nickMatch) return;
+      const author = tags['display-name'] || nickMatch[1] || 'unknown';
+      const text   = msgMatch[1] || '';
+      const isSub  = tags['subscriber'] === '1';
+      const isMod  = tags['mod'] === '1';
+      const badge  = isMod ? 'mod' : (isSub ? 'sub' : null);
+      if(text) addMsg('twitch', author, text, badge);
+    });
+  } catch(e) {
+    console.warn('Twitch history fetch failed:', e.message);
+  }
+}
+
+async function fetchKickHistory(chatroomId) {
+  try {
+    const r = await fetch(`https://kick.com/api/v2/channels/${chatroomId}/messages`);
+    if(!r.ok) return;
+    const data = await r.json();
+    const messages = data.data?.messages || data.messages || [];
+    if(!messages.length) return;
+    addSys('Loading Kick chat history...');
+    // Messages come newest first — reverse so oldest appears at top
+    [...messages].reverse().forEach(msg => {
+      const sender = msg.sender?.username || msg.metadata?.sender?.username || 'unknown';
+      const text   = msg.content || '';
+      const isMod  = msg.sender?.identity?.badges?.some(b => b.type === 'moderator');
+      if(text) addMsg('kick', sender, text, isMod ? 'mod' : null);
+    });
+  } catch(e) {
+    console.warn('Kick history fetch failed:', e.message);
+  }
 }
 
 function connectYouTube(input) {
