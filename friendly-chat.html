@@ -1214,9 +1214,14 @@ function connectTwitch(channel) {
   ws.onclose = () => { if(S.channels.twitch === channel) addSys('Twitch: disconnected'); };
 }
 
+const KICK_RECONNECT_BASE_DELAY_MS = 2000;
+const KICK_RECONNECT_MAX_DELAY_MS  = 30000;
+const KICK_MAX_RECONNECT_ATTEMPTS  = 10;
+
 // ---- Kick chat via Pusher WebSocket (anonymous read-only, no token needed) ----
-function connectKick(channel) {
+function connectKick(channel, reconnectAttempt = 0) {
   if(S.sockets.kick) { try{S.sockets.kick.close();}catch(e){} }
+  if(S.intervals.kick) { clearInterval(S.intervals.kick); S.intervals.kick = null; }
   addSys(`Connecting to Kick: ${channel}...`);
 
   // First fetch the channel info to get the chatroom ID
@@ -1239,6 +1244,7 @@ function connectKick(channel) {
       const PUSHER_KEY = '32cbd69e4b950bf97679';
       const ws = new WebSocket(`wss://ws-us2.pusher.com/app/${PUSHER_KEY}?protocol=7&client=js&version=7.4.0&flash=false`);
       S.sockets.kick = ws;
+      let forceClose = false;
 
       ws.onopen = () => {};
 
@@ -1251,8 +1257,20 @@ function connectKick(channel) {
             data: { auth: '', channel: `chatrooms.${chatroomId}.v2` }
           }));
           addSys(`Connected to Kick: ${channel}`);
+          reconnectAttempt = 0;
+          // Send a periodic client ping so idle rooms stay alive.
+          if(S.intervals.kick) clearInterval(S.intervals.kick);
+          S.intervals.kick = setInterval(() => {
+            if(S.channels.kick !== channel || S.sockets.kick !== ws || ws.readyState !== WebSocket.OPEN) return;
+            ws.send(JSON.stringify({ event: 'pusher:ping', data: {} }));
+          }, 4 * 60 * 1000);
           // Fetch recent chat history
           fetchKickHistory(chatroomId);
+          return;
+        }
+        // Required by Pusher protocol to keep the socket from timing out.
+        if(msg.event === 'pusher:ping') {
+          ws.send(JSON.stringify({ event: 'pusher:pong', data: {} }));
           return;
         }
         if(msg.event !== 'App\\Events\\ChatMessageEvent') return;
@@ -1291,7 +1309,28 @@ function connectKick(channel) {
       };
 
       ws.onerror = () => addSys('Kick: connection error');
-      ws.onclose = () => { if(S.channels.kick === channel) addSys('Kick: disconnected'); };
+      ws.onclose = () => {
+        if(S.intervals.kick) { clearInterval(S.intervals.kick); S.intervals.kick = null; }
+        if(S.sockets.kick === ws) S.sockets.kick = null;
+        if(S.channels.kick !== channel || forceClose) return;
+        addSys('Kick: disconnected');
+        if(reconnectAttempt >= KICK_MAX_RECONNECT_ATTEMPTS) {
+          addSys('Kick: reconnect limit reached (click Leave/Join to retry)');
+          return;
+        }
+        const delay = Math.min(KICK_RECONNECT_BASE_DELAY_MS * (2 ** reconnectAttempt), KICK_RECONNECT_MAX_DELAY_MS);
+        addSys(`Kick: reconnecting in ${Math.round(delay / 1000)}s...`);
+        setTimeout(() => {
+          if(S.channels.kick === channel) connectKick(channel, reconnectAttempt + 1);
+        }, delay);
+      };
+
+      // Prevent scheduled reconnect from firing when user manually leaves/switches.
+      const origClose = ws.close.bind(ws);
+      ws.close = (...args) => {
+        forceClose = true;
+        return origClose(...args);
+      };
     })
     .catch(err => addSys(`Kick: could not load channel (${err.message}). CORS may block this from file:// — use a local server.`));
 }
