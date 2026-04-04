@@ -43,6 +43,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280, height: 800, minWidth: 900, minHeight: 600,
     title: 'Friendly Chat',
+    icon: process.platform === 'linux' ? path.join(__dirname, 'icon.png') : undefined,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
