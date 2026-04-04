@@ -31,7 +31,8 @@
       "preload.js",
       "server.js",
       "friendly-chat.html",
-      "config.json"
+      "config.json",
+      "icon.png"
     ],
     "win": {
       "target": "nsis",
