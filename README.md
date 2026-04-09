@@ -88,7 +88,8 @@ Add it to your local `config.json`:
 }
 ```
 
-`client_secret` is optional in Friendly Chat. When it is not set, Friendly Chat falls back to YouTube's implicit token flow (`response_type=token`), which can connect successfully but does not return a refresh token for silent renewals.
+Friendly Chat uses OAuth authorization code + PKCE for YouTube so refresh tokens can be used for silent renewals.  
+`client_secret` is optional for OAuth client types that support public clients (PKCE). Some Google OAuth app types (such as Web application) may still require `client_secret` during token exchange.
 
 ---
 
