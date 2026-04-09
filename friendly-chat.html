@@ -444,6 +444,30 @@ function getRedirectUri() {
   return window.location.origin + window.location.pathname;
 }
 
+function setPkceVerifier(platform, verifier) {
+  if(!platform || !verifier) return;
+  const key = `${platform}_verifier`;
+  sessionStorage.setItem(key, verifier);
+  localStorage.setItem(key, verifier);
+}
+
+function getPkceVerifier(platform, openerWindow = null) {
+  if(!platform) return '';
+  const key = `${platform}_verifier`;
+  const fromOpener = openerWindow?.sessionStorage?.getItem(key);
+  return fromOpener
+      || sessionStorage.getItem(key)
+      || localStorage.getItem(key)
+      || '';
+}
+
+function clearPkceVerifier(platform) {
+  if(!platform) return;
+  const key = `${platform}_verifier`;
+  sessionStorage.removeItem(key);
+  localStorage.removeItem(key);
+}
+
 function saveYouTubeTokens({ access_token, refresh_token, expires_in }) {
   if(access_token) {
     localStorage.setItem('youtube_access_token', access_token);
@@ -555,12 +579,11 @@ async function getYouTubeAccessToken(forceRefresh = false) {
 
   if(window.opener && !window.opener.closed) {
     if(code && platform === 'youtube') {
-      const verifier = window.opener.sessionStorage?.getItem('youtube_verifier')
-                    || sessionStorage.getItem('youtube_verifier');
+      const verifier = getPkceVerifier('youtube', window.opener);
       exchangeYouTubeCodeForToken(code, verifier)
       .then(d => {
-        window.opener.sessionStorage?.removeItem('youtube_verifier');
-        sessionStorage.removeItem('youtube_verifier');
+        clearPkceVerifier('youtube');
+        window.opener.clearPkceVerifier?.('youtube');
         window.opener.postMessage({
           type: 'oauth_callback',
           platform: 'youtube',
@@ -629,10 +652,10 @@ async function getYouTubeAccessToken(forceRefresh = false) {
 
   // Fallback: main tab full-page redirect
   if(code && platform === 'youtube') {
-    const verifier = sessionStorage.getItem('youtube_verifier');
+    const verifier = getPkceVerifier('youtube');
     exchangeYouTubeCodeForToken(code, verifier)
       .then(d => {
-        sessionStorage.removeItem('youtube_verifier');
+        clearPkceVerifier('youtube');
         saveYouTubeTokens(d);
         history.replaceState(null, '', window.location.pathname);
         markConnected('youtube', d.access_token);
@@ -826,7 +849,7 @@ async function startYouTubeOAuth() {
 
   S.currentPlatform = 'youtube';
   const { verifier, challenge } = await generatePKCE();
-  sessionStorage.setItem('youtube_verifier', verifier);
+  setPkceVerifier('youtube', verifier);
 
   const redirectUri = encodeURIComponent(getRedirectUri());
   const scope = encodeURIComponent('https://www.googleapis.com/auth/youtube.force-ssl');
