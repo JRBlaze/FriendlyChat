@@ -468,6 +468,22 @@ function clearPkceVerifier(platform) {
   localStorage.removeItem(key);
 }
 
+function emitOAuthCallback(platform, payload) {
+  if(!platform) return;
+  const key = `oauth_callback_${platform}`;
+  try {
+    localStorage.setItem(key, JSON.stringify({
+      ...payload,
+      platform,
+      type: 'oauth_callback',
+      ts: Date.now()
+    }));
+    // Remove immediately so future attempts can reuse the same key and so we
+    // don't accidentally process stale callbacks on reload.
+    localStorage.removeItem(key);
+  } catch(_) {}
+}
+
 function saveYouTubeTokens({ access_token, refresh_token, expires_in }) {
   if(access_token) {
     localStorage.setItem('youtube_access_token', access_token);
@@ -584,7 +600,7 @@ async function getYouTubeAccessToken(forceRefresh = false) {
       .then(d => {
         clearPkceVerifier('youtube');
         window.opener.clearPkceVerifier?.('youtube');
-        window.opener.postMessage({
+        const payload = {
           type: 'oauth_callback',
           platform: 'youtube',
           token: d.access_token || null,
@@ -592,16 +608,20 @@ async function getYouTubeAccessToken(forceRefresh = false) {
           expires_in: d.expires_in || null,
           error: null,
           errorDesc: null
-        }, window.location.origin);
+        };
+        window.opener.postMessage(payload, window.location.origin);
+        emitOAuthCallback('youtube', payload);
         window.close();
       })
       .catch(e => {
-        window.opener.postMessage({
+        const payload = {
           type: 'oauth_callback',
           platform: 'youtube',
           token: null,
           error: e.message
-        }, window.location.origin);
+        };
+        window.opener.postMessage(payload, window.location.origin);
+        emitOAuthCallback('youtube', payload);
         window.close();
       });
       return;
@@ -658,10 +678,27 @@ async function getYouTubeAccessToken(forceRefresh = false) {
         clearPkceVerifier('youtube');
         saveYouTubeTokens(d);
         history.replaceState(null, '', window.location.pathname);
+        const payload = {
+          token: d.access_token || null,
+          refresh_token: d.refresh_token || null,
+          expires_in: d.expires_in || null,
+          error: null,
+          errorDesc: null
+        };
+        emitOAuthCallback('youtube', payload);
+        if(window.name === 'youtube_oauth') {
+          window.close();
+          return;
+        }
         markConnected('youtube', d.access_token);
       })
       .catch(e => {
         history.replaceState(null, '', window.location.pathname);
+        emitOAuthCallback('youtube', { token: null, error: e.message });
+        if(window.name === 'youtube_oauth') {
+          window.close();
+          return;
+        }
         showToast(`YouTube auth failed: ${e.message}`);
       });
     return;
@@ -875,26 +912,41 @@ async function startYouTubeOAuth() {
     return;
   }
 
-  function onMessage(e) {
-    if(e.origin !== window.location.origin) return;
-    if(!e.data || e.data.type !== 'oauth_callback' || e.data.platform !== 'youtube') return;
+  const callbackStorageKey = 'oauth_callback_youtube';
+  function handleYouTubeOAuthResult(data) {
+    if(!data || data.type !== 'oauth_callback' || data.platform !== 'youtube') return;
     window.removeEventListener('message', onMessage);
+    window.removeEventListener('storage', onStorage);
     clearInterval(closedPoll);
 
-    if(e.data.token) {
+    if(data.token) {
       saveYouTubeTokens({
-        access_token: e.data.token,
-        refresh_token: e.data.refresh_token,
-        expires_in: e.data.expires_in
+        access_token: data.token,
+        refresh_token: data.refresh_token,
+        expires_in: data.expires_in
       });
-      markConnected('youtube', e.data.token);
+      markConnected('youtube', data.token);
     } else {
       resetConnectBtn('youtube');
-      const desc = (e.data.errorDesc || e.data.error || 'unknown error').replace(/\+/g,' ');
+      const desc = (data.errorDesc || data.error || 'unknown error').replace(/\+/g,' ');
       showToast(`Auth failed: ${desc}`);
     }
   }
+
+  function onMessage(e) {
+    if(e.origin !== window.location.origin) return;
+    handleYouTubeOAuthResult(e.data);
+  }
   window.addEventListener('message', onMessage);
+
+  function onStorage(e) {
+    if(e.key !== callbackStorageKey || !e.newValue) return;
+    try {
+      const data = JSON.parse(e.newValue);
+      handleYouTubeOAuthResult(data);
+    } catch(_) {}
+  }
+  window.addEventListener('storage', onStorage);
 
   const closedPoll = setInterval(() => {
     let wasClosed = false;
@@ -902,6 +954,7 @@ async function startYouTubeOAuth() {
     if(wasClosed) {
       clearInterval(closedPoll);
       window.removeEventListener('message', onMessage);
+      window.removeEventListener('storage', onStorage);
       if(!S.tokens.youtube) {
         resetConnectBtn('youtube');
         showToast('Authorization cancelled');
