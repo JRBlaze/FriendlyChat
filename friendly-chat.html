@@ -1056,13 +1056,20 @@ async function startYouTubeOAuth() {
     try { wasClosed = !!popup.closed; } catch(_) { return; }
     if(wasClosed) {
       clearInterval(closedPoll);
-      clearInterval(callbackPoll);
-      window.removeEventListener('message', onMessage);
-      window.removeEventListener('storage', onStorage);
-      if(!S.tokens.youtube) {
-        resetConnectBtn('youtube');
-        showToast('Authorization cancelled');
-      }
+      // OAuth callbacks can race the popup close event in Electron.
+      // Give storage/message delivery a brief grace period before treating
+      // the close as a cancellation.
+      if(consumeStoredOAuthCallback()) return;
+      setTimeout(() => {
+        if(consumeStoredOAuthCallback()) return;
+        clearInterval(callbackPoll);
+        window.removeEventListener('message', onMessage);
+        window.removeEventListener('storage', onStorage);
+        if(!S.tokens.youtube) {
+          resetConnectBtn('youtube');
+          showToast('Authorization cancelled');
+        }
+      }, 800);
     }
   }, 400);
 }
