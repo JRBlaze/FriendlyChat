@@ -371,6 +371,15 @@ async function loadConfig(retries = 5, delayMs = 800) {
   }
 }
 
+async function ensureYouTubeClientId() {
+  if(YOUTUBE_CLIENT_ID) return YOUTUBE_CLIENT_ID;
+  await loadConfig(1, 0);
+  if(!YOUTUBE_CLIENT_ID) {
+    throw new Error('Missing YouTube client ID');
+  }
+  return YOUTUBE_CLIENT_ID;
+}
+
 const CFG = {
   twitch: {
     name:'Twitch', logoText:'TW', logoBg:'#9146ff', logoColor:'#fff',
@@ -448,6 +457,7 @@ function saveYouTubeTokens({ access_token, refresh_token, expires_in }) {
 
 async function exchangeYouTubeCodeForToken(code, codeVerifier) {
   if(!code || !codeVerifier) throw new Error('Missing OAuth code verifier');
+  await ensureYouTubeClientId();
   const payload = new URLSearchParams({
     client_id: YOUTUBE_CLIENT_ID,
     code,
@@ -479,6 +489,7 @@ async function refreshYouTubeToken(force = false) {
   }
 
   S.youtubeRefreshPromise = (async () => {
+    await ensureYouTubeClientId();
     const payload = new URLSearchParams({
       client_id: YOUTUBE_CLIENT_ID,
       grant_type: 'refresh_token',
@@ -808,6 +819,7 @@ function startOAuth(p) {
 }
 
 async function startYouTubeOAuth() {
+  await ensureYouTubeClientId();
   const btn = document.getElementById('btn-youtube');
   btn.textContent = 'Connecting...';
   btn.className = 'conn-btn pending';
