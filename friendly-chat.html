@@ -149,6 +149,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .badge.mod{background:rgba(83,252,24,0.2);color:var(--kick);}
 .badge.member{background:rgba(255,68,68,0.2);color:var(--youtube);}
 .badge.vip{background:rgba(255,200,0,0.2);color:#ffcc00;}
+.twitch-badges{display:inline-flex;align-items:center;gap:3px;margin-right:4px;vertical-align:middle;}
+.twitch-badge-img{width:18px;height:18px;vertical-align:middle;border-radius:2px;image-rendering:auto;}
 .sys-msg{padding:3px 14px;font-size:calc(var(--chat-font-size) - 2px);font-family:'JetBrains Mono',monospace;color:#8888aa;display:flex;align-items:center;gap:8px;}
 .sys-msg::before,.sys-msg::after{content:'';flex:1;height:1px;background:var(--border);}
 
@@ -436,6 +438,8 @@ const S = {
   thirdPartyEmotes: { twitch: {}, kick: {} },
   // Native emotes fetched from platform APIs: { emoteName -> { url, source } }
   nativeEmotes: { twitch: {}, kick: {} },
+  // Twitch badge set cache { global: {setId -> versions}, channel: {setId -> versions} }
+  twitchBadges: { global: {}, channel: {}, broadcasterId: null },
   // Recent chatters for @mention autocomplete { "platform:name" -> { name, platform } }
   recentChatters: new Map(),
   youtubeSeenIds: new Set(),
@@ -1470,7 +1474,7 @@ function leaveCh(p) {
   S.channels[p] = null;
   if(S.sockets[p]) { try { S.sockets[p].close(); } catch(e){} S.sockets[p] = null; }
   if(S.intervals[p]) { clearInterval(S.intervals[p]); S.intervals[p] = null; }
-  if(p === 'twitch') { S.twitchBroadcasterId = null; S.twitchBroadcasterChannel = null; S.thirdPartyEmotes.twitch = {}; S.nativeEmotes.twitch = {}; }
+  if(p === 'twitch') { S.twitchBroadcasterId = null; S.twitchBroadcasterChannel = null; S.thirdPartyEmotes.twitch = {}; S.nativeEmotes.twitch = {}; S.twitchBadges = { global: {}, channel: {}, broadcasterId: null }; }
   if(p === 'kick')   { S.kickBroadcasterId   = null; S.kickBroadcasterChannel   = null; S.thirdPartyEmotes.kick   = {}; S.nativeEmotes.kick   = {}; }
   if(p === 'youtube') { S.youtubeLiveChatId = null; S.youtubeSeenIds.clear(); }
   document.getElementById(`cw-${p}`).classList.remove(`act-${p}`);
@@ -1544,10 +1548,15 @@ function connectTwitch(channel) {
               S.twitchBroadcasterId      = d.data[0].id;
               S.twitchBroadcasterChannel = channel;
             }
+            fetchTwitchBadges();
             fetchTwitchNativeEmotes();
           })
-          .catch(() => fetchTwitchNativeEmotes());
+          .catch(() => {
+            fetchTwitchBadges();
+            fetchTwitchNativeEmotes();
+          });
         } else {
+          fetchTwitchBadges();
           fetchTwitchNativeEmotes();
         }
         return;
@@ -1555,11 +1564,11 @@ function connectTwitch(channel) {
 
       if(!raw.includes('PRIVMSG')) return;
 
-      // Parse IRCv3 tags
+      // Parse IRCv3 tags once (display name, badges, emotes, message id)
       let displayName = '', badgeClass = null;
+      const tags = {};
       const tagMatch = raw.match(/^@([^ ]+)/);
       if(tagMatch) {
-        const tags = {};
         tagMatch[1].split(';').forEach(part => {
           const eq = part.indexOf('=');
           if(eq !== -1) tags[part.slice(0, eq)] = part.slice(eq + 1);
@@ -1584,16 +1593,9 @@ function connectTwitch(channel) {
       // Parse emotes tag — format: "id:start-end,start-end/id:start-end"
       // We need the raw tag block again, re-parse it here for emotes
       let emoteMap = null;
-      const emoteTagMatch = raw.match(/^@([^ ]+)/);
-      if(emoteTagMatch) {
-        const etags = {};
-        emoteTagMatch[1].split(';').forEach(part => {
-          const eq = part.indexOf('=');
-          if(eq !== -1) etags[part.slice(0, eq)] = part.slice(eq + 1);
-        });
-        if(etags['emotes']) {
-          emoteMap = {};
-          etags['emotes'].split('/').forEach(entry => {
+      if(tags['emotes']) {
+        emoteMap = {};
+        tags['emotes'].split('/').forEach(entry => {
             const colon = entry.indexOf(':');
             if(colon === -1) return;
             const id = entry.slice(0, colon);
@@ -1604,13 +1606,14 @@ function connectTwitch(channel) {
               emoteMap[start] = { id, end };
             });
           });
-        }
+        });
       }
 
       if(S.channels.twitch === channel) {
-        const msgEl = addMsg('twitch', displayName, text, badgeClass, emoteMap);
+        const badgeHtml = renderTwitchBadges(tags['badges'] || '');
+        const msgEl = addMsg('twitch', displayName, text, badgeClass, emoteMap, null, badgeHtml);
         // Store the message ID so moderation delete can reference it
-        if(msgEl && etags['id']) msgEl.dataset.msgId = etags['id'];
+        if(msgEl && tags['id']) msgEl.dataset.msgId = tags['id'];
       }
     });
   };
@@ -1788,7 +1791,8 @@ async function fetchTwitchHistory(channel) {
       const isSub  = tags['subscriber'] === '1';
       const isMod  = tags['mod'] === '1';
       const badge  = isMod ? 'mod' : (isSub ? 'sub' : null);
-      if(text) addMsg('twitch', author, text, badge);
+      const badgeHtml = renderTwitchBadges(tags['badges'] || '');
+      if(text) addMsg('twitch', author, text, badge, null, null, badgeHtml);
     });
   } catch(e) {
     console.warn('Twitch history fetch failed:', e.message);
@@ -2215,6 +2219,71 @@ async function fetchThirdPartyEmotes(platform, twitchLogin, twitchUserId) {
   if(count > 0) addSys(`Loaded ${count} third-party emotes (7TV/BTTV)`);
 }
 
+function getTwitchBadgeVersionMap(badgeSetId) {
+  return S.twitchBadges.channel[badgeSetId] || S.twitchBadges.global[badgeSetId] || null;
+}
+
+function renderTwitchBadges(badgesTag = '') {
+  if(!badgesTag) return '';
+  const rendered = [];
+  badgesTag.split(',').forEach(entry => {
+    const slash = entry.indexOf('/');
+    if(slash === -1) return;
+    const setId = entry.slice(0, slash);
+    const version = entry.slice(slash + 1);
+    const versionMap = getTwitchBadgeVersionMap(setId);
+    const badge = versionMap?.[version] || null;
+    const img = badge?.image_url_1x || badge?.image_url_2x || badge?.image_url_4x;
+    if(!img) return;
+    rendered.push(
+      `<img class="twitch-badge-img" src="${img}" alt="${escapeHtml(setId)}" title="${escapeHtml(setId)} ${escapeHtml(version)}">`
+    );
+  });
+  return rendered.length ? `<span class="twitch-badges">${rendered.join('')}</span>` : '';
+}
+
+async function fetchTwitchBadges() {
+  const token = S.tokens.twitch;
+  const clientId = TWITCH_CLIENT_ID || extractClientId(CFG.twitch.url);
+  if(!token || !clientId) return;
+
+  const headers = { 'Authorization': `Bearer ${token}`, 'Client-Id': clientId };
+  try {
+    const globalRes = await fetch('https://api.twitch.tv/helix/chat/badges/global', { headers });
+    if(globalRes.ok) {
+      const data = await globalRes.json();
+      const map = {};
+      (data.data || []).forEach(set => {
+        const versions = {};
+        (set.versions || []).forEach(v => { versions[v.id] = v; });
+        map[set.set_id] = versions;
+      });
+      S.twitchBadges.global = map;
+    }
+  } catch(e) {
+    console.warn('Twitch global badges fetch failed:', e.message);
+  }
+
+  if(!S.twitchBroadcasterId) return;
+  if(S.twitchBadges.broadcasterId === S.twitchBroadcasterId && Object.keys(S.twitchBadges.channel).length > 0) return;
+
+  try {
+    const chanRes = await fetch(`https://api.twitch.tv/helix/chat/badges?broadcaster_id=${S.twitchBroadcasterId}`, { headers });
+    if(!chanRes.ok) return;
+    const data = await chanRes.json();
+    const map = {};
+    (data.data || []).forEach(set => {
+      const versions = {};
+      (set.versions || []).forEach(v => { versions[v.id] = v; });
+      map[set.set_id] = versions;
+    });
+    S.twitchBadges.channel = map;
+    S.twitchBadges.broadcasterId = S.twitchBroadcasterId;
+  } catch(e) {
+    console.warn('Twitch channel badges fetch failed:', e.message);
+  }
+}
+
 // Renders third-party emotes in a plain-text HTML string.
 // Called AFTER native emote rendering — operates on already-escaped text segments.
 // Splits each text node on spaces and replaces matching emote names with <img> tags.
@@ -2295,7 +2364,7 @@ function renderKickEmotes(text) {
   }).join('');
 }
 
-function addMsg(p, author, text, badge, emoteMap, ytBadgeUrl) {
+function addMsg(p, author, text, badge, emoteMap, ytBadgeUrl, authorPrefixHtml) {
   const feed = document.getElementById('feed');
   const el = document.createElement('div');
   el.className = `msg${!S.filter.has(p) ? ' hide' : ''}`;
@@ -2328,7 +2397,8 @@ function addMsg(p, author, text, badge, emoteMap, ytBadgeUrl) {
     ? `<img class="yt-avatar" src="${ytBadgeUrl}" alt="">`
     : '';
 
-  el.innerHTML = `<div class="m-dot ${p}"></div><span class="m-time">${ftime()}</span>${ytAvatar}<span class="m-author ${p}" data-user="${escapeHtml(author)}" data-platform="${p}" onclick="openUserMenu(event,this)">${bdg}${escapeHtml(author)}</span><span class="m-colon">:</span><span class="m-body">${bodyHtml}</span>`;
+  const authorPrefix = authorPrefixHtml || '';
+  el.innerHTML = `<div class="m-dot ${p}"></div><span class="m-time">${ftime()}</span>${ytAvatar}<span class="m-author ${p}" data-user="${escapeHtml(author)}" data-platform="${p}" onclick="openUserMenu(event,this)">${authorPrefix}${bdg}${escapeHtml(author)}</span><span class="m-colon">:</span><span class="m-body">${bodyHtml}</span>`;
 
   // Highlight the message if it mentions the authenticated user's name
   const selfNames = [
