@@ -413,7 +413,7 @@ const CFG = {
     scopes:['Read live chat messages','Send live chat messages','View your YouTube account info'],
     authBtnBg:'#ff4444', authBtnColor:'#fff', authBtnLabel:'Authorize with Google',
     get url() {
-      return `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(YOUTUBE_CLIENT_ID)}&scope=${encodeURIComponent('https://www.googleapis.com/auth/youtube.force-ssl')}&response_type=token&prompt=consent`;
+      return `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(YOUTUBE_CLIENT_ID)}&scope=${encodeURIComponent('https://www.googleapis.com/auth/youtube.force-ssl')}&response_type=code&access_type=offline&prompt=consent`;
     }
   },
   kick: {
@@ -562,7 +562,7 @@ async function exchangeYouTubeCodeForToken(code, codeVerifier) {
       throw new Error(
         YOUTUBE_HAS_CLIENT_SECRET
           ? 'YouTube rejected the OAuth app configuration. Confirm the Google OAuth client type and redirect URI.'
-          : 'YouTube OAuth requires a client secret for this Google OAuth app. Add youtube.client_secret to config.json or use an OAuth client type that supports PKCE-only flows.'
+          : 'YouTube OAuth for this app type requires a client secret. Use an OAuth client type that supports PKCE/public clients (for example Desktop) or add youtube.client_secret to config.json.'
       );
     }
     throw new Error(err);
@@ -960,32 +960,18 @@ async function startYouTubeOAuth() {
 
   const redirectUri = encodeURIComponent(getRedirectUri());
   const scope = encodeURIComponent('https://www.googleapis.com/auth/youtube.force-ssl');
-  let oauthUrl = '';
-
-  if(YOUTUBE_HAS_CLIENT_SECRET) {
-    const { verifier, challenge } = await generatePKCE();
-    setPkceVerifier('youtube', verifier);
-    oauthUrl = `https://accounts.google.com/o/oauth2/v2/auth`
-      + `?client_id=${encodeURIComponent(YOUTUBE_CLIENT_ID)}`
-      + `&response_type=code`
-      + `&redirect_uri=${redirectUri}`
-      + `&scope=${scope}`
-      + `&access_type=offline`
-      + `&prompt=consent`
-      + `&code_challenge=${challenge}`
-      + `&code_challenge_method=S256`
-      + `&state=youtube`;
-  } else {
-    clearPkceVerifier('youtube');
-    oauthUrl = `https://accounts.google.com/o/oauth2/v2/auth`
-      + `?client_id=${encodeURIComponent(YOUTUBE_CLIENT_ID)}`
-      + `&response_type=token`
-      + `&redirect_uri=${redirectUri}`
-      + `&scope=${scope}`
-      + `&prompt=consent`
-      + `&state=youtube`;
-    dbg('youtube.oauth', 'Using implicit token flow because youtube.client_secret is not configured');
-  }
+  const { verifier, challenge } = await generatePKCE();
+  setPkceVerifier('youtube', verifier);
+  const oauthUrl = `https://accounts.google.com/o/oauth2/v2/auth`
+    + `?client_id=${encodeURIComponent(YOUTUBE_CLIENT_ID)}`
+    + `&response_type=code`
+    + `&redirect_uri=${redirectUri}`
+    + `&scope=${scope}`
+    + `&access_type=offline`
+    + `&prompt=consent`
+    + `&code_challenge=${challenge}`
+    + `&code_challenge_method=S256`
+    + `&state=youtube`;
 
   const width = 500, height = 700;
   const left = Math.round(window.screenX + (window.outerWidth - width) / 2);
@@ -1931,6 +1917,7 @@ async function pollYouTube(videoId, liveChatId, apiKey, pageToken) {
 
   const token = await getYouTubeAccessToken();
   const useOAuth = !!token;
+
   const params = new URLSearchParams({
     liveChatId,
     part: 'id,snippet,authorDetails',
