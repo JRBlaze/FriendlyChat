@@ -478,9 +478,6 @@ function emitOAuthCallback(platform, payload) {
       type: 'oauth_callback',
       ts: Date.now()
     }));
-    // Remove immediately so future attempts can reuse the same key and so we
-    // don't accidentally process stale callbacks on reload.
-    localStorage.removeItem(key);
   } catch(_) {}
 }
 
@@ -913,11 +910,29 @@ async function startYouTubeOAuth() {
   }
 
   const callbackStorageKey = 'oauth_callback_youtube';
+  function consumeStoredOAuthCallback() {
+    const raw = localStorage.getItem(callbackStorageKey);
+    if(!raw) return false;
+    try {
+      const data = JSON.parse(raw);
+      if(data?.type === 'oauth_callback' && data?.platform === 'youtube') {
+        // Ignore very old callbacks to avoid replaying stale auth results.
+        if(!data.ts || (Date.now() - data.ts) < 300000) {
+          handleYouTubeOAuthResult(data);
+          return true;
+        }
+      }
+    } catch(_) {}
+    return false;
+  }
+
   function handleYouTubeOAuthResult(data) {
     if(!data || data.type !== 'oauth_callback' || data.platform !== 'youtube') return;
     window.removeEventListener('message', onMessage);
     window.removeEventListener('storage', onStorage);
+    clearInterval(callbackPoll);
     clearInterval(closedPoll);
+    localStorage.removeItem(callbackStorageKey);
 
     if(data.token) {
       saveYouTubeTokens({
@@ -948,11 +963,18 @@ async function startYouTubeOAuth() {
   }
   window.addEventListener('storage', onStorage);
 
+  const callbackPoll = setInterval(() => {
+    if(consumeStoredOAuthCallback()) {
+      clearInterval(callbackPoll);
+    }
+  }, 300);
+
   const closedPoll = setInterval(() => {
     let wasClosed = false;
     try { wasClosed = !!popup.closed; } catch(_) { return; }
     if(wasClosed) {
       clearInterval(closedPoll);
+      clearInterval(callbackPoll);
       window.removeEventListener('message', onMessage);
       window.removeEventListener('storage', onStorage);
       if(!S.tokens.youtube) {
