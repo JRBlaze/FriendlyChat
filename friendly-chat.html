@@ -61,6 +61,13 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .conn-btn.discon:hover{border-color:#ff5555;color:#ff5555;}
 .conn-btn.pending{opacity:0.6;cursor:wait;}
 .oauth-footer{padding:16px 28px 24px;display:flex;align-items:center;justify-content:space-between;}
+.debug-panel{margin:0 28px 22px;padding:10px;border:1px solid var(--border);background:var(--surface2);border-radius:10px;}
+.debug-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px;}
+.debug-title{font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text-muted);}
+.debug-actions{display:flex;gap:6px;}
+.debug-btn{padding:4px 8px;border-radius:6px;border:1px solid var(--border2);background:var(--surface3);color:var(--text-muted);font-size:10px;font-family:'JetBrains Mono',monospace;cursor:pointer;}
+.debug-btn:hover{color:var(--text);border-color:var(--text-dim);}
+.debug-log{width:100%;height:96px;resize:vertical;border:1px solid var(--border);background:#0f0f14;color:#b9bfd1;padding:8px;border-radius:8px;font-family:'JetBrains Mono',monospace;font-size:10px;line-height:1.5;outline:none;}
 .skip-btn{font-size:13px;color:var(--text-muted);cursor:pointer;text-decoration:underline;text-underline-offset:2px;background:none;border:none;font-family:'DM Sans',sans-serif;}
 .skip-btn:hover{color:var(--text);}
 .continue-btn{padding:9px 22px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:500;font-family:'DM Sans',sans-serif;cursor:pointer;}
@@ -257,6 +264,16 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
       <button class="skip-btn" onclick="dismiss()">Skip for now (read-only)</button>
       <button class="continue-btn" onclick="dismiss()">Continue</button>
     </div>
+    <div class="debug-panel">
+      <div class="debug-head">
+        <span class="debug-title">YOUTUBE CONNECT DEBUG LOG</span>
+        <div class="debug-actions">
+          <button class="debug-btn" onclick="copyDebugLog()">Copy</button>
+          <button class="debug-btn" onclick="clearDebugLog()">Clear</button>
+        </div>
+      </div>
+      <textarea id="debug-log" class="debug-log" readonly></textarea>
+    </div>
   </div>
 </div>
 
@@ -350,6 +367,7 @@ let TWITCH_CLIENT_ID  = '';
 let KICK_CLIENT_ID_PUB = '';
 
 async function loadConfig(retries = 5, delayMs = 800) {
+  dbg('config', 'Loading /config', { retries, delayMs });
   for(let attempt = 1; attempt <= retries; attempt++) {
     try {
       const r = await fetch('/config');
@@ -359,9 +377,15 @@ async function loadConfig(retries = 5, delayMs = 800) {
       YOUTUBE_CLIENT_ID  = c.youtube?.client_id || '';
       YOUTUBE_API_KEY    = c.youtube?.api_key   || '';
       KICK_CLIENT_ID_PUB = c.kick?.client_id    || '';
+      dbg('config', 'Loaded /config successfully', {
+        hasYoutubeClientId: !!YOUTUBE_CLIENT_ID,
+        hasKickClientId: !!KICK_CLIENT_ID_PUB,
+        hasTwitchClientId: !!TWITCH_CLIENT_ID
+      });
       CFG.twitch.url = `https://id.twitch.tv/oauth2/authorize?client_id=${TWITCH_CLIENT_ID}&scope=chat%3Aread+chat%3Aedit+user%3Awrite%3Achat+moderator%3Amanage%3Abanned_users+moderator%3Amanage%3Achat_messages+user%3Aread%3Aemotes&response_type=token`;
       return;
     } catch(e) {
+      dbg('config', `Attempt ${attempt} failed`, e.message);
       if(attempt < retries) {
         await new Promise(res => setTimeout(res, delayMs));
       } else {
@@ -430,7 +454,8 @@ const S = {
   recentChatters: new Map(),
   youtubeSeenIds: new Set(),
   youtubeReadMode: 'auto',
-  youtubeRefreshPromise: null
+  youtubeRefreshPromise: null,
+  youtubeTriedImplicit: false
 };
 
 // ALL_PLATFORMS must be defined before S.filter and S.target are initialized
@@ -439,6 +464,53 @@ S.filter = new Set(ALL_PLATFORMS);
 S.target = new Set(ALL_PLATFORMS);
 
 function ftime(){const d=new Date();return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;}
+
+const DEBUG_LOG_MAX = 120;
+const debugLogBuffer = [];
+
+function dbg(scope, message, meta = null) {
+  const ts = new Date().toISOString();
+  let line = `[${ts}] [${scope}] ${message}`;
+  if(meta !== null && meta !== undefined) {
+    try {
+      line += ` | ${typeof meta === 'string' ? meta : JSON.stringify(meta)}`;
+    } catch(_) {}
+  }
+  debugLogBuffer.push(line);
+  if(debugLogBuffer.length > DEBUG_LOG_MAX) debugLogBuffer.shift();
+  const area = document.getElementById('debug-log');
+  if(area) {
+    area.value = debugLogBuffer.join('\n');
+    area.scrollTop = area.scrollHeight;
+  }
+  console.log(line);
+}
+
+function clearDebugLog() {
+  debugLogBuffer.length = 0;
+  const area = document.getElementById('debug-log');
+  if(area) area.value = '';
+  dbg('debug', 'Log cleared');
+}
+
+async function copyDebugLog() {
+  const text = debugLogBuffer.join('\n');
+  if(!text) { showToast('No debug logs yet'); return; }
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('Debug log copied');
+  } catch(_) {
+    showToast('Could not copy log');
+  }
+}
+
+window.addEventListener('error', (e) => {
+  dbg('window.error', e.message, { file: e.filename, line: e.lineno, col: e.colno });
+});
+window.addEventListener('unhandledrejection', (e) => {
+  const reason = e.reason?.message || e.reason || 'unknown rejection';
+  dbg('window.unhandledrejection', String(reason));
+});
 
 function getRedirectUri() {
   return window.location.origin + window.location.pathname;
@@ -494,6 +566,10 @@ function saveYouTubeTokens({ access_token, refresh_token, expires_in }) {
 
 async function exchangeYouTubeCodeForToken(code, codeVerifier) {
   if(!code || !codeVerifier) throw new Error('Missing OAuth code verifier');
+  dbg('youtube.oauth', 'Exchanging auth code for token', {
+    hasCode: !!code,
+    hasVerifier: !!codeVerifier
+  });
   await ensureYouTubeClientId();
   const payload = new URLSearchParams({
     client_id: YOUTUBE_CLIENT_ID,
@@ -509,8 +585,17 @@ async function exchangeYouTubeCodeForToken(code, codeVerifier) {
   });
   const data = await res.json().catch(() => ({}));
   if(!res.ok || data.error) {
+    dbg('youtube.oauth', 'Token exchange failed', {
+      status: res.status,
+      error: data.error || data.error_description || 'unknown'
+    });
     throw new Error(data.error_description || data.error || `HTTP ${res.status}`);
   }
+  dbg('youtube.oauth', 'Token exchange success', {
+    hasAccessToken: !!data.access_token,
+    hasRefreshToken: !!data.refresh_token,
+    expiresIn: data.expires_in || null
+  });
   return data;
 }
 
@@ -583,6 +668,7 @@ async function getYouTubeAccessToken(forceRefresh = false) {
   const fromSearch = new URLSearchParams(search.replace('?',''));
 
   const token    = fromHash.get('access_token') || fromSearch.get('access_token');
+  const expiresIn= fromHash.get('expires_in')   || fromSearch.get('expires_in');
   const code     = fromSearch.get('code');
   const error    = fromHash.get('error')    || fromSearch.get('error');
   const errorDesc= fromHash.get('error_description') || fromSearch.get('error_description');
@@ -661,6 +747,7 @@ async function getYouTubeAccessToken(forceRefresh = false) {
     window.opener.postMessage({
       type: 'oauth_callback', platform,
       token: token || null,
+      expires_in: expiresIn ? Number(expiresIn) : null,
       error: error || null, errorDesc: errorDesc || null
     }, window.location.origin);
     window.close();
@@ -703,6 +790,12 @@ async function getYouTubeAccessToken(forceRefresh = false) {
 
   if(token) {
     history.replaceState(null, '', window.location.pathname);
+    if(platform === 'youtube') {
+      saveYouTubeTokens({
+        access_token: token,
+        expires_in: expiresIn ? Number(expiresIn) : null
+      });
+    }
     markConnected(platform, token);
   }
 })();
@@ -765,6 +858,7 @@ function restoreTwitchSession() {
 }
 
 function restoreYouTubeSession() {
+  dbg('youtube.session', 'Attempting restore from localStorage');
   const token = localStorage.getItem('youtube_access_token') || '';
   const refreshToken = localStorage.getItem('youtube_refresh_token') || '';
   if(!token && !refreshToken) return;
@@ -785,9 +879,11 @@ function restoreYouTubeSession() {
     })
     .then(() => {
       const accessToken = S.tokens.youtube || localStorage.getItem('youtube_access_token');
+      dbg('youtube.session', 'Restore validation succeeded', { hasAccessToken: !!accessToken });
       if(accessToken) markConnected('youtube', accessToken);
     })
-    .catch(() => {
+    .catch((e) => {
+      dbg('youtube.session', 'Restore failed, clearing tokens', e?.message || 'unknown');
       localStorage.removeItem('youtube_access_token');
       localStorage.removeItem('youtube_refresh_token');
       localStorage.removeItem('youtube_token_expiry');
@@ -798,6 +894,7 @@ function restoreYouTubeSession() {
 // Kick uses PKCE Authorization Code flow via the local proxy server.
 // Twitch and YouTube use Implicit flow (token returned directly in hash).
 function startOAuth(p) {
+  dbg('oauth', 'Start requested', { platform: p, protocol: window.location.protocol });
   if(window.location.protocol === 'file:') {
     showToast('Run from a local server first — see the warning above');
     return;
@@ -875,33 +972,51 @@ function startOAuth(p) {
   }, 400);
 }
 
-async function startYouTubeOAuth() {
+async function startYouTubeOAuth(useImplicitFallback = false) {
+  dbg('youtube.oauth', 'Starting YouTube OAuth flow', {
+    mode: useImplicitFallback ? 'implicit_fallback' : 'pkce_code'
+  });
   await ensureYouTubeClientId();
   const btn = document.getElementById('btn-youtube');
   btn.textContent = 'Connecting...';
   btn.className = 'conn-btn pending';
 
   S.currentPlatform = 'youtube';
-  const { verifier, challenge } = await generatePKCE();
-  setPkceVerifier('youtube', verifier);
-
   const redirectUri = encodeURIComponent(getRedirectUri());
   const scope = encodeURIComponent('https://www.googleapis.com/auth/youtube.force-ssl');
-  const oauthUrl = `https://accounts.google.com/o/oauth2/v2/auth`
-    + `?client_id=${encodeURIComponent(YOUTUBE_CLIENT_ID)}`
-    + `&response_type=code`
-    + `&redirect_uri=${redirectUri}`
-    + `&scope=${scope}`
-    + `&access_type=offline`
-    + `&prompt=consent`
-    + `&code_challenge=${challenge}`
-    + `&code_challenge_method=S256`
-    + `&state=youtube`;
+  let oauthUrl = '';
+
+  if(useImplicitFallback) {
+    S.youtubeTriedImplicit = true;
+    clearPkceVerifier('youtube');
+    oauthUrl = `https://accounts.google.com/o/oauth2/v2/auth`
+      + `?client_id=${encodeURIComponent(YOUTUBE_CLIENT_ID)}`
+      + `&response_type=token`
+      + `&redirect_uri=${redirectUri}`
+      + `&scope=${scope}`
+      + `&prompt=consent`
+      + `&state=youtube`;
+  } else {
+    S.youtubeTriedImplicit = false;
+    const { verifier, challenge } = await generatePKCE();
+    setPkceVerifier('youtube', verifier);
+    oauthUrl = `https://accounts.google.com/o/oauth2/v2/auth`
+      + `?client_id=${encodeURIComponent(YOUTUBE_CLIENT_ID)}`
+      + `&response_type=code`
+      + `&redirect_uri=${redirectUri}`
+      + `&scope=${scope}`
+      + `&access_type=offline`
+      + `&prompt=consent`
+      + `&code_challenge=${challenge}`
+      + `&code_challenge_method=S256`
+      + `&state=youtube`;
+  }
 
   const width = 500, height = 700;
   const left = Math.round(window.screenX + (window.outerWidth - width) / 2);
   const top = Math.round(window.screenY + (window.outerHeight - height) / 2);
   const popup = window.open(oauthUrl, 'youtube_oauth', `width=${width},height=${height},left=${left},top=${top},toolbar=no,menubar=no`);
+  dbg('youtube.oauth', 'Popup opened', { opened: !!popup });
 
   if(!popup) {
     showToast('Popup blocked — redirecting in current tab...');
@@ -927,6 +1042,11 @@ async function startYouTubeOAuth() {
   }
 
   function handleYouTubeOAuthResult(data) {
+    dbg('youtube.oauth', 'OAuth callback received', {
+      hasToken: !!data?.token,
+      hasRefreshToken: !!data?.refresh_token,
+      error: data?.error || null
+    });
     if(!data || data.type !== 'oauth_callback' || data.platform !== 'youtube') return;
     window.removeEventListener('message', onMessage);
     window.removeEventListener('storage', onStorage);
@@ -944,6 +1064,14 @@ async function startYouTubeOAuth() {
     } else {
       resetConnectBtn('youtube');
       const desc = (data.errorDesc || data.error || 'unknown error').replace(/\+/g,' ');
+      const lowered = desc.toLowerCase();
+      if(!S.youtubeTriedImplicit && lowered.includes('client_secret is missing')) {
+        dbg('youtube.oauth', 'Detected missing client secret; retrying with implicit fallback');
+        showToast('Retrying YouTube auth with token-only fallback...');
+        startYouTubeOAuth(true);
+        return;
+      }
+      dbg('youtube.oauth', 'OAuth callback failure', desc);
       showToast(`Auth failed: ${desc}`);
     }
   }
@@ -1087,6 +1215,7 @@ async function startKickOAuth() {
 }
 
 function markConnected(p, token) {
+  dbg('oauth', 'Platform connected', { platform: p, hasToken: !!token });
   S.auth[p] = true;
   S.tokens[p] = token;
   document.getElementById(`row-${p}`).className = `oauth-row conn-${p}`;
@@ -1122,6 +1251,7 @@ function markConnected(p, token) {
 }
 
 function resetConnectBtn(p) {
+  dbg('oauth', 'Reset connect button', { platform: p });
   const btn = document.getElementById(`btn-${p}`);
   btn.textContent = 'Connect';
   btn.className = `conn-btn ${p}-c`;
