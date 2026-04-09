@@ -61,13 +61,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .conn-btn.discon:hover{border-color:#ff5555;color:#ff5555;}
 .conn-btn.pending{opacity:0.6;cursor:wait;}
 .oauth-footer{padding:16px 28px 24px;display:flex;align-items:center;justify-content:space-between;}
-.debug-panel{margin:0 28px 22px;padding:10px;border:1px solid var(--border);background:var(--surface2);border-radius:10px;}
-.debug-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px;}
-.debug-title{font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text-muted);}
-.debug-actions{display:flex;gap:6px;}
-.debug-btn{padding:4px 8px;border-radius:6px;border:1px solid var(--border2);background:var(--surface3);color:var(--text-muted);font-size:10px;font-family:'JetBrains Mono',monospace;cursor:pointer;}
-.debug-btn:hover{color:var(--text);border-color:var(--text-dim);}
-.debug-log{width:100%;height:96px;resize:vertical;border:1px solid var(--border);background:#0f0f14;color:#b9bfd1;padding:8px;border-radius:8px;font-family:'JetBrains Mono',monospace;font-size:10px;line-height:1.5;outline:none;}
 .skip-btn{font-size:13px;color:var(--text-muted);cursor:pointer;text-decoration:underline;text-underline-offset:2px;background:none;border:none;font-family:'DM Sans',sans-serif;}
 .skip-btn:hover{color:var(--text);}
 .continue-btn{padding:9px 22px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:500;font-family:'DM Sans',sans-serif;cursor:pointer;}
@@ -264,16 +257,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
       <button class="skip-btn" onclick="dismiss()">Skip for now (read-only)</button>
       <button class="continue-btn" onclick="dismiss()">Continue</button>
     </div>
-    <div class="debug-panel">
-      <div class="debug-head">
-        <span class="debug-title">YOUTUBE CONNECT DEBUG LOG</span>
-        <div class="debug-actions">
-          <button class="debug-btn" onclick="copyDebugLog()">Copy</button>
-          <button class="debug-btn" onclick="clearDebugLog()">Clear</button>
-        </div>
-      </div>
-      <textarea id="debug-log" class="debug-log" readonly></textarea>
-    </div>
   </div>
 </div>
 
@@ -467,9 +450,6 @@ S.target = new Set(ALL_PLATFORMS);
 
 function ftime(){const d=new Date();return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;}
 
-const DEBUG_LOG_MAX = 120;
-const debugLogBuffer = [];
-
 function dbg(scope, message, meta = null) {
   const ts = new Date().toISOString();
   let line = `[${ts}] [${scope}] ${message}`;
@@ -478,32 +458,7 @@ function dbg(scope, message, meta = null) {
       line += ` | ${typeof meta === 'string' ? meta : JSON.stringify(meta)}`;
     } catch(_) {}
   }
-  debugLogBuffer.push(line);
-  if(debugLogBuffer.length > DEBUG_LOG_MAX) debugLogBuffer.shift();
-  const area = document.getElementById('debug-log');
-  if(area) {
-    area.value = debugLogBuffer.join('\n');
-    area.scrollTop = area.scrollHeight;
-  }
   console.log(line);
-}
-
-function clearDebugLog() {
-  debugLogBuffer.length = 0;
-  const area = document.getElementById('debug-log');
-  if(area) area.value = '';
-  dbg('debug', 'Log cleared');
-}
-
-async function copyDebugLog() {
-  const text = debugLogBuffer.join('\n');
-  if(!text) { showToast('No debug logs yet'); return; }
-  try {
-    await navigator.clipboard.writeText(text);
-    showToast('Debug log copied');
-  } catch(_) {
-    showToast('Could not copy log');
-  }
 }
 
 window.addEventListener('error', (e) => {
