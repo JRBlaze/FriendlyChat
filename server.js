@@ -51,7 +51,10 @@ function start(CFG) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         twitch:  { client_id: CFG.twitch?.client_id  || '' },
-        youtube: { client_id: CFG.youtube?.client_id || '' },
+        youtube: {
+          client_id: CFG.youtube?.client_id || '',
+          has_client_secret: !!CFG.youtube?.client_secret,
+        },
         kick:    { client_id: kickClientId },
         has_kick_proxy: HAS_PROXY,
       }));
