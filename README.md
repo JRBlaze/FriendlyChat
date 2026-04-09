@@ -74,6 +74,22 @@ npm run build:mac    # Mac
 npm run build:linux  # Linux
 ```
 
+### YouTube OAuth note
+
+If your Google OAuth client is configured as a **Web application**, Google may require a `client_secret` during token exchange.  
+Add it to your local `config.json`:
+
+```json
+{
+  "youtube": {
+    "client_id": "YOUR_CLIENT_ID",
+    "client_secret": "YOUR_CLIENT_SECRET"
+  }
+}
+```
+
+`client_secret` is optional in Friendly Chat, but required for some Google OAuth client setups.
+
 ---
 
 ## Built with
