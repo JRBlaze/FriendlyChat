@@ -978,21 +978,35 @@ async function startYouTubeOAuth() {
   btn.className = 'conn-btn pending';
 
   S.currentPlatform = 'youtube';
-  const { verifier, challenge } = await generatePKCE();
-  setPkceVerifier('youtube', verifier);
 
   const redirectUri = encodeURIComponent(getRedirectUri());
   const scope = encodeURIComponent('https://www.googleapis.com/auth/youtube.force-ssl');
-  const oauthUrl = `https://accounts.google.com/o/oauth2/v2/auth`
-    + `?client_id=${encodeURIComponent(YOUTUBE_CLIENT_ID)}`
-    + `&response_type=code`
-    + `&redirect_uri=${redirectUri}`
-    + `&scope=${scope}`
-    + `&access_type=offline`
-    + `&prompt=consent`
-    + `&code_challenge=${challenge}`
-    + `&code_challenge_method=S256`
-    + `&state=youtube`;
+  let oauthUrl = '';
+
+  if(YOUTUBE_HAS_CLIENT_SECRET) {
+    const { verifier, challenge } = await generatePKCE();
+    setPkceVerifier('youtube', verifier);
+    oauthUrl = `https://accounts.google.com/o/oauth2/v2/auth`
+      + `?client_id=${encodeURIComponent(YOUTUBE_CLIENT_ID)}`
+      + `&response_type=code`
+      + `&redirect_uri=${redirectUri}`
+      + `&scope=${scope}`
+      + `&access_type=offline`
+      + `&prompt=consent`
+      + `&code_challenge=${challenge}`
+      + `&code_challenge_method=S256`
+      + `&state=youtube`;
+  } else {
+    clearPkceVerifier('youtube');
+    oauthUrl = `https://accounts.google.com/o/oauth2/v2/auth`
+      + `?client_id=${encodeURIComponent(YOUTUBE_CLIENT_ID)}`
+      + `&response_type=token`
+      + `&redirect_uri=${redirectUri}`
+      + `&scope=${scope}`
+      + `&prompt=consent`
+      + `&state=youtube`;
+    dbg('youtube.oauth', 'Using implicit token flow because youtube.client_secret is not configured');
+  }
 
   const width = 500, height = 700;
   const left = Math.round(window.screenX + (window.outerWidth - width) / 2);
