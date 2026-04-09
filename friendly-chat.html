@@ -151,6 +151,15 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .badge.vip{background:rgba(255,200,0,0.2);color:#ffcc00;}
 .twitch-badges{display:inline-flex;align-items:center;gap:3px;margin-right:4px;vertical-align:middle;}
 .twitch-badge-img{width:18px;height:18px;vertical-align:middle;border-radius:2px;image-rendering:auto;}
+.kick-badges{display:inline-flex;align-items:center;gap:3px;margin-right:4px;vertical-align:middle;flex-wrap:wrap;}
+.kick-badge-label{display:inline-flex;align-items:center;height:16px;padding:0 5px;border-radius:3px;font-size:9px;font-family:'JetBrains Mono',monospace;letter-spacing:0.04em;font-weight:600;text-transform:uppercase;line-height:1;}
+.kick-badge-img{width:16px;height:16px;border-radius:3px;vertical-align:middle;object-fit:cover;}
+.kick-badge-moderator{background:rgba(83,252,24,0.2);color:var(--kick);}
+.kick-badge-subscriber{background:rgba(145,70,255,0.25);color:#c6a5ff;}
+.kick-badge-vip{background:rgba(255,200,0,0.2);color:#ffcc00;}
+.kick-badge-event{background:rgba(124,107,255,0.24);color:#c4b8ff;}
+.kick-badge-gifter,.kick-badge-gifted{background:rgba(255,90,138,0.2);color:#ff9fbc;}
+.kick-badge-default{background:var(--surface3);color:var(--text-muted);}
 .sys-msg{padding:3px 14px;font-size:calc(var(--chat-font-size) - 2px);font-family:'JetBrains Mono',monospace;color:#8888aa;display:flex;align-items:center;gap:8px;}
 .sys-msg::before,.sys-msg::after{content:'';flex:1;height:1px;background:var(--border);}
 
@@ -1684,8 +1693,10 @@ function connectKick(channel, reconnectAttempt = 0) {
         const payload = JSON.parse(msg.data);
         const sender = payload.sender?.username || 'unknown';
         const text = payload.content || '';
-        const isMod = payload.sender?.identity?.badges?.some(b => b.type === 'moderator');
-        const badgeClass = isMod ? 'mod' : null;
+        const kickBadges = payload.sender?.identity?.badges || [];
+        const isMod = kickBadges.some(b => b.type === 'moderator');
+        const badgeClass = isMod && kickBadges.length === 0 ? 'mod' : null;
+        const kickBadgeHtml = renderKickBadges(kickBadges);
 
         // Collect native Kick emotes from message payloads as they arrive.
         // Two sources: the emotes array in the payload, and inline [emote:id:name] tokens.
@@ -1712,7 +1723,7 @@ function connectKick(channel, reconnectAttempt = 0) {
         }
 
         // Kick sends emotes as inline [emote:id:name] tokens inside the content string
-        if(S.channels.kick === channel) addMsg('kick', sender, text, badgeClass);
+        if(S.channels.kick === channel) addMsg('kick', sender, text, badgeClass, null, null, kickBadgeHtml);
       };
 
       ws.onerror = () => addSys('Kick: connection error');
@@ -1810,8 +1821,11 @@ async function fetchKickHistory(chatroomId) {
     [...messages].reverse().forEach(msg => {
       const sender = msg.sender?.username || msg.metadata?.sender?.username || 'unknown';
       const text   = msg.content || '';
-      const isMod  = msg.sender?.identity?.badges?.some(b => b.type === 'moderator');
-      if(text) addMsg('kick', sender, text, isMod ? 'mod' : null);
+      const kickBadges = msg.sender?.identity?.badges || msg.metadata?.sender?.identity?.badges || [];
+      const isMod  = kickBadges.some(b => b.type === 'moderator');
+      const kickBadgeHtml = renderKickBadges(kickBadges);
+      const badgeClass = isMod && kickBadges.length === 0 ? 'mod' : null;
+      if(text) addMsg('kick', sender, text, badgeClass, null, null, kickBadgeHtml);
     });
   } catch(e) {
     console.warn('Kick history fetch failed:', e.message);
@@ -2361,6 +2375,41 @@ function renderKickEmotes(text) {
     }
     return linkify(escapeHtml(part));
   }).join('');
+}
+
+function getKickBadgeLabel(type = '') {
+  const normalized = String(type || '').toLowerCase().trim();
+  const labels = {
+    moderator: 'MOD',
+    subscriber: 'SUB',
+    vip: 'VIP',
+    event: 'EVENT',
+    gifter: 'GIFTER',
+    gifted: 'GIFTED',
+    founder: 'FOUNDER',
+    verified: 'VERIFIED',
+  };
+  if(labels[normalized]) return labels[normalized];
+  return normalized ? normalized.replace(/[_-]+/g, ' ').toUpperCase() : 'BADGE';
+}
+
+function renderKickBadges(badges = []) {
+  if(!Array.isArray(badges) || badges.length === 0) return '';
+  const rendered = badges.map(badge => {
+    if(!badge || typeof badge !== 'object') return '';
+    const type = String(badge.type || '').toLowerCase();
+    const label = getKickBadgeLabel(type);
+    const imageUrl = badge.image_url || badge.image || badge.icon || badge.badge_image || badge.badge_url || '';
+
+    if(imageUrl) {
+      return `<img class="kick-badge-img" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(label)}" title="${escapeHtml(label)}">`;
+    }
+
+    const classType = type ? `kick-badge-${escapeHtml(type)}` : 'kick-badge-default';
+    return `<span class="kick-badge-label ${classType}">${escapeHtml(label)}</span>`;
+  }).filter(Boolean);
+
+  return rendered.length ? `<span class="kick-badges">${rendered.join('')}</span>` : '';
 }
 
 function addMsg(p, author, text, badge, emoteMap, ytBadgeUrl, authorPrefixHtml) {
