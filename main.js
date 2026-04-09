@@ -13,6 +13,10 @@ require('./server').start(cfg);
 ipcMain.handle('kick-fetch-emotes', async (event, channel) => {
   try { return await fetchKickEmotesViaWindow(channel); } catch(e) { return null; }
 });
+ipcMain.on('renderer-debug-log', (_event, line) => {
+  if(typeof line !== 'string' || !line.trim()) return;
+  console.log(`[renderer] ${line}`);
+});
 
 function fetchKickEmotesViaWindow(channel) {
   return new Promise((resolve) => {

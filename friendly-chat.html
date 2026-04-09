@@ -484,6 +484,7 @@ function dbg(scope, message, meta = null) {
     area.scrollTop = area.scrollHeight;
   }
   console.log(line);
+  window.electronAPI?.logDebug?.(line);
 }
 
 function clearDebugLog() {
