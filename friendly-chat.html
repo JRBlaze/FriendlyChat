@@ -365,6 +365,7 @@ let YOUTUBE_CLIENT_ID = '';
 let YOUTUBE_API_KEY   = '';
 let TWITCH_CLIENT_ID  = '';
 let KICK_CLIENT_ID_PUB = '';
+let YOUTUBE_HAS_CLIENT_SECRET = false;
 
 async function loadConfig(retries = 5, delayMs = 800) {
   dbg('config', 'Loading /config', { retries, delayMs });
@@ -376,9 +377,11 @@ async function loadConfig(retries = 5, delayMs = 800) {
       TWITCH_CLIENT_ID   = c.twitch?.client_id  || '';
       YOUTUBE_CLIENT_ID  = c.youtube?.client_id || '';
       YOUTUBE_API_KEY    = c.youtube?.api_key   || '';
+      YOUTUBE_HAS_CLIENT_SECRET = !!c.youtube?.has_client_secret;
       KICK_CLIENT_ID_PUB = c.kick?.client_id    || '';
       dbg('config', 'Loaded /config successfully', {
         hasYoutubeClientId: !!YOUTUBE_CLIENT_ID,
+        hasYoutubeClientSecret: YOUTUBE_HAS_CLIENT_SECRET,
         hasKickClientId: !!KICK_CLIENT_ID_PUB,
         hasTwitchClientId: !!TWITCH_CLIENT_ID
       });
@@ -570,17 +573,15 @@ async function exchangeYouTubeCodeForToken(code, codeVerifier) {
     hasVerifier: !!codeVerifier
   });
   await ensureYouTubeClientId();
-  const payload = new URLSearchParams({
-    client_id: YOUTUBE_CLIENT_ID,
-    code,
-    code_verifier: codeVerifier,
-    grant_type: 'authorization_code',
-    redirect_uri: getRedirectUri()
-  });
-  const res = await fetch('https://oauth2.googleapis.com/token', {
+  const res = await fetch('/youtube-token', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: payload.toString()
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      client_id: YOUTUBE_CLIENT_ID,
+      code,
+      code_verifier: codeVerifier,
+      redirect_uri: getRedirectUri(),
+    })
   });
   const data = await res.json().catch(() => ({}));
   if(!res.ok || data.error) {
@@ -588,7 +589,15 @@ async function exchangeYouTubeCodeForToken(code, codeVerifier) {
       status: res.status,
       error: data.error || data.error_description || 'unknown'
     });
-    throw new Error(data.error_description || data.error || `HTTP ${res.status}`);
+    const err = data.error_description || data.error || `HTTP ${res.status}`;
+    if(String(err).toLowerCase().includes('client_secret is missing')) {
+      throw new Error(
+        YOUTUBE_HAS_CLIENT_SECRET
+          ? 'YouTube rejected the OAuth app configuration. Confirm the Google OAuth client type and redirect URI.'
+          : 'YouTube OAuth requires a client secret for this Google OAuth app. Add youtube.client_secret to config.json or use an OAuth client type that supports PKCE-only flows.'
+      );
+    }
+    throw new Error(err);
   }
   dbg('youtube.oauth', 'Token exchange success', {
     hasAccessToken: !!data.access_token,
@@ -611,15 +620,13 @@ async function refreshYouTubeToken(force = false) {
 
   S.youtubeRefreshPromise = (async () => {
     await ensureYouTubeClientId();
-    const payload = new URLSearchParams({
-      client_id: YOUTUBE_CLIENT_ID,
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken
-    });
-    const res = await fetch('https://oauth2.googleapis.com/token', {
+    const res = await fetch('/youtube-refresh', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: payload.toString()
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id: YOUTUBE_CLIENT_ID,
+        refresh_token: refreshToken
+      })
     });
     const data = await res.json().catch(() => ({}));
     if(!res.ok || data.error || !data.access_token) {
