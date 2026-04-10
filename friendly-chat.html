@@ -251,12 +251,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
         <div class="status-dot off" id="sd-twitch"></div>
         <button class="conn-btn twitch-c" id="btn-twitch" onclick="startOAuth('twitch')">Connect</button>
       </div>
-      <div class="oauth-row" id="row-youtube">
-        <div class="plat-icon youtube">YT</div>
-        <div class="plat-info"><strong>YouTube</strong><small id="st-youtube">Not connected</small></div>
-        <div class="status-dot off" id="sd-youtube"></div>
-        <button class="conn-btn youtube-c" id="btn-youtube" onclick="startOAuth('youtube')">Connect</button>
-      </div>
       <div class="oauth-row" id="row-kick">
         <div class="plat-icon kick">KI</div>
         <div class="plat-info"><strong>Kick</strong><small id="st-kick">Not connected</small></div>
@@ -280,11 +274,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
         <input type="text" id="ci-twitch" placeholder="channel name" />
         <button class="join-btn" id="jb-twitch" onclick="joinCh('twitch')">Join</button>
       </div>
-      <div class="ch-wrap" id="cw-youtube">
-        <span class="plat-tag youtube">YOUTUBE</span>
-        <input type="text" id="ci-youtube" placeholder="video ID or URL" />
-        <button class="join-btn" id="jb-youtube" onclick="joinCh('youtube')">Join</button>
-      </div>
       <div class="ch-wrap" id="cw-kick">
         <span class="plat-tag kick">KICK</span>
         <input type="text" id="ci-kick" placeholder="channel name" />
@@ -294,7 +283,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
     <button class="acc-btn" onclick="openOAuth()">
       <div class="acc-dots">
         <div class="acc-dot" id="ad-twitch"></div>
-        <div class="acc-dot" id="ad-youtube"></div>
         <div class="acc-dot" id="ad-kick"></div>
       </div>
       <span>Accounts</span>
@@ -309,7 +297,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
       <div class="filter-bar">
         <span class="chip all on" id="fc-all" onclick="toggleFilterAll()">ALL</span>
         <span class="chip twitch" id="fc-twitch" onclick="toggleFilter('twitch')">TWITCH</span>
-        <span class="chip youtube" id="fc-youtube" onclick="toggleFilter('youtube')">YOUTUBE</span>
         <span class="chip kick" id="fc-kick" onclick="toggleFilter('kick')">KICK</span>
         <div class="font-size-ctrl">
           <button class="fs-btn" onclick="adjustFontSize(-1)" title="Decrease font size">A−</button>
@@ -331,7 +318,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
           <span class="s-label">TO:</span>
           <span class="t-chip all-t sel" id="tc-all" onclick="toggleTargetAll()">ALL</span>
           <span class="t-chip twitch-t" id="tc-twitch" onclick="toggleTarget('twitch')">TWITCH</span>
-          <span class="t-chip youtube-t" id="tc-youtube" onclick="toggleTarget('youtube')">YOUTUBE</span>
           <span class="t-chip kick-t" id="tc-kick" onclick="toggleTarget('kick')">KICK</span>
         </div>
         <div class="send-row">
@@ -457,7 +443,7 @@ const S = {
 };
 
 // ALL_PLATFORMS must be defined before S.filter and S.target are initialized
-const ALL_PLATFORMS = ['twitch','youtube','kick'];
+const ALL_PLATFORMS = ['twitch','kick'];
 S.filter = new Set(ALL_PLATFORMS);
 S.target = new Set(ALL_PLATFORMS);
 
