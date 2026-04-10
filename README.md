@@ -34,7 +34,7 @@ You can watch and read chats without signing in. Signing in is only required to 
 ## Development
 
 ```bash
-git clone https://github.com/JRBlaze/FriendlyChatElectronApp.git
+git clone https://github.com/JRBlaze/FriendlyChat.git
 cd FriendlyChatElectronApp
 npm install
 npm start
