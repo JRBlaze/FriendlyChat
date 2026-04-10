@@ -4,7 +4,6 @@
   "description": "Multi-platform stream chat merger for Twitch and Kick",
   "author": {
     "name": "JRBlaze",
-    "email": "jrblaze@friendly-chat.app"
   },
   "main": "main.js",
   "scripts": {
