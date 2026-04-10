@@ -1,6 +1,6 @@
 // Friendly Chat - Proxy Server
 // Deploy this to Railway, Render, or any Node.js host.
-// Set environment variables: KICK_CLIENT_ID, KICK_CLIENT_SECRET, YOUTUBE_API_KEY
+// Set environment variables: KICK_CLIENT_ID, KICK_CLIENT_SECRET
 //
 // Railway: railway.app
 //   1. Create account at railway.app
@@ -12,7 +12,6 @@ const http = require('http');
 
 const KICK_CLIENT_ID     = process.env.KICK_CLIENT_ID     || '';
 const KICK_CLIENT_SECRET = process.env.KICK_CLIENT_SECRET || '';
-const YOUTUBE_API_KEY    = process.env.YOUTUBE_API_KEY    || '';
 const ALLOWED_ORIGIN     = process.env.ALLOWED_ORIGIN     || '*';
 const PORT               = process.env.PORT               || 3000;
 
@@ -52,14 +51,6 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({ client_id: KICK_CLIENT_ID }));
     return;
   }
-
-  // Returns the YouTube API key (stored securely as an env var, never in the repo)
-  if(url.pathname === '/youtube-config' && req.method === 'GET') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ api_key: YOUTUBE_API_KEY }));
-    return;
-  }
-
   // Exchanges a PKCE auth code for access + refresh tokens
   if(url.pathname === '/kick-token' && req.method === 'POST') {
     try {

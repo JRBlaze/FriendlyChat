@@ -51,10 +51,6 @@ function start(CFG) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         twitch:  { client_id: CFG.twitch?.client_id  || '' },
-        youtube: {
-          client_id: CFG.youtube?.client_id || '',
-          has_client_secret: !!CFG.youtube?.client_secret,
-        },
         kick:    { client_id: kickClientId },
         has_kick_proxy: HAS_PROXY,
       }));
@@ -110,89 +106,6 @@ function start(CFG) {
       }
       return;
     }
-
-    // ── /youtube-token — exchange code for token locally (optional client secret)
-    if(pathname === '/youtube-token' && req.method === 'POST') {
-      try {
-        const { code, code_verifier, redirect_uri, client_id } = await readBody(req);
-        const youtubeClientId = client_id || CFG.youtube?.client_id || '';
-        const youtubeClientSecret = CFG.youtube?.client_secret || '';
-        const params = new URLSearchParams({
-          grant_type: 'authorization_code',
-          client_id: youtubeClientId,
-          code_verifier,
-          code,
-          redirect_uri: redirect_uri || `http://localhost:${PORT}/friendly-chat.html`,
-        });
-        if(youtubeClientSecret) {
-          params.set('client_secret', youtubeClientSecret);
-        }
-        const ytRes = await fetch('https://oauth2.googleapis.com/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: params.toString(),
-        });
-        const data = await ytRes.json().catch(() => ({}));
-        if(!ytRes.ok || data.error) {
-          res.writeHead(ytRes.status || 400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            error: data.error_description || data.error || 'YouTube token exchange failed',
-          }));
-          return;
-        }
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          access_token: data.access_token,
-          refresh_token: data.refresh_token,
-          expires_in: data.expires_in,
-        }));
-      } catch(e) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: e.message }));
-      }
-      return;
-    }
-
-    // ── /youtube-refresh — refresh token locally (optional client secret) ─────
-    if(pathname === '/youtube-refresh' && req.method === 'POST') {
-      try {
-        const { refresh_token, client_id } = await readBody(req);
-        const youtubeClientId = client_id || CFG.youtube?.client_id || '';
-        const youtubeClientSecret = CFG.youtube?.client_secret || '';
-        const params = new URLSearchParams({
-          grant_type: 'refresh_token',
-          client_id: youtubeClientId,
-          refresh_token,
-        });
-        if(youtubeClientSecret) {
-          params.set('client_secret', youtubeClientSecret);
-        }
-        const ytRes = await fetch('https://oauth2.googleapis.com/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: params.toString(),
-        });
-        const data = await ytRes.json().catch(() => ({}));
-        if(!ytRes.ok || data.error || !data.access_token) {
-          res.writeHead(ytRes.status || 400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            error: data.error_description || data.error || 'YouTube token refresh failed',
-          }));
-          return;
-        }
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          access_token: data.access_token,
-          refresh_token: data.refresh_token || refresh_token,
-          expires_in: data.expires_in,
-        }));
-      } catch(e) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: e.message }));
-      }
-      return;
-    }
-
     // ── /kick-send — uses user's own access token, no secret needed ──────────
     if(pathname === '/kick-send' && req.method === 'POST') {
       try {
