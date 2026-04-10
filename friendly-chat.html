@@ -496,7 +496,14 @@ function setPkceVerifier(platform, verifier) {
 function getPkceVerifier(platform, openerWindow = null) {
   if(!platform) return '';
   const key = `${platform}_verifier`;
-  const fromOpener = openerWindow?.sessionStorage?.getItem(key);
+  let fromOpener = '';
+  try {
+    fromOpener = openerWindow?.sessionStorage?.getItem(key) || '';
+  } catch(_) {
+    // Cross-origin access to opener can throw SecurityError; fall back
+    // to the popup's own storage (which shares localStorage with the opener).
+    fromOpener = '';
+  }
   return fromOpener
       || sessionStorage.getItem(key)
       || localStorage.getItem(key)
@@ -618,10 +625,17 @@ async function refreshYouTubeToken(force = false) {
 
 async function getYouTubeAccessToken(forceRefresh = false) {
   const token = S.tokens.youtube || localStorage.getItem('youtube_access_token') || '';
-  if(!token) return '';
+  const hasRefreshToken = !!localStorage.getItem('youtube_refresh_token');
+
+  // No access token at all: try a refresh if we can, otherwise bail.
+  if(!token) {
+    if(hasRefreshToken) {
+      return (await refreshYouTubeToken(true).catch(() => null)) || '';
+    }
+    return '';
+  }
 
   const expiry = parseInt(localStorage.getItem('youtube_token_expiry') || '0', 10);
-  const hasRefreshToken = !!localStorage.getItem('youtube_refresh_token');
   const isExpired = expiry > 0 && expiry <= Date.now() + 120000;
 
   // Implicit OAuth flow does not return a refresh token. Once the access token
@@ -633,10 +647,10 @@ async function getYouTubeAccessToken(forceRefresh = false) {
     return '';
   }
 
-  const shouldRefresh = forceRefresh || (hasRefreshToken && expiry <= Date.now() + 120000);
+  const shouldRefresh = forceRefresh || (hasRefreshToken && isExpired);
 
   if(shouldRefresh) {
-    return refreshYouTubeToken(true);
+    return (await refreshYouTubeToken(true).catch(() => null)) || '';
   }
   return token;
 }
@@ -660,39 +674,56 @@ async function getYouTubeAccessToken(forceRefresh = false) {
 
   if(!platform || !CFG[platform]) return;
 
-  if(window.opener && !window.opener.closed) {
-    if(code && platform === 'youtube') {
-      const verifier = getPkceVerifier('youtube', window.opener);
-      exchangeYouTubeCodeForToken(code, verifier)
-      .then(d => {
-        clearPkceVerifier('youtube');
-        window.opener.clearPkceVerifier?.('youtube');
-        const payload = {
-          type: 'oauth_callback',
-          platform: 'youtube',
-          token: d.access_token || null,
-          refresh_token: d.refresh_token || null,
-          expires_in: d.expires_in || null,
-          error: null,
-          errorDesc: null
-        };
-        window.opener.postMessage(payload, window.location.origin);
-        emitOAuthCallback('youtube', payload);
-        window.close();
-      })
-      .catch(e => {
-        const payload = {
-          type: 'oauth_callback',
-          platform: 'youtube',
-          token: null,
-          error: e.message
-        };
-        window.opener.postMessage(payload, window.location.origin);
-        emitOAuthCallback('youtube', payload);
-        window.close();
+  // YouTube: handle the code exchange regardless of whether `window.opener` is
+  // still accessible. Google's login page sends a Cross-Origin-Opener-Policy
+  // that severs `window.opener` after the cross-origin hop in Electron/Chromium,
+  // so we cannot rely on postMessage alone. Always persist tokens to
+  // localStorage here so the parent can pick them up (via storage event,
+  // periodic polling, or a page reload fallback).
+  const isYouTubePopup = code && platform === 'youtube'
+    && (window.name === 'youtube_oauth' || (window.opener && !window.opener.closed));
+  if(isYouTubePopup) {
+    const verifier = getPkceVerifier('youtube', window.opener);
+    exchangeYouTubeCodeForToken(code, verifier)
+    .then(d => {
+      clearPkceVerifier('youtube');
+      try { window.opener?.clearPkceVerifier?.('youtube'); } catch(_) {}
+      // Persist tokens to the canonical keys from the popup itself so the
+      // refresh_token is never lost even if the callback signal fails to
+      // reach the parent window.
+      saveYouTubeTokens({
+        access_token: d.access_token,
+        refresh_token: d.refresh_token,
+        expires_in: d.expires_in
       });
-      return;
-    }
+      const payload = {
+        type: 'oauth_callback',
+        platform: 'youtube',
+        token: d.access_token || null,
+        refresh_token: d.refresh_token || null,
+        expires_in: d.expires_in || null,
+        error: null,
+        errorDesc: null
+      };
+      try { window.opener?.postMessage(payload, window.location.origin); } catch(_) {}
+      emitOAuthCallback('youtube', payload);
+      window.close();
+    })
+    .catch(e => {
+      const payload = {
+        type: 'oauth_callback',
+        platform: 'youtube',
+        token: null,
+        error: e.message
+      };
+      try { window.opener?.postMessage(payload, window.location.origin); } catch(_) {}
+      emitOAuthCallback('youtube', payload);
+      window.close();
+    });
+    return;
+  }
+
+  if(window.opener && !window.opener.closed) {
 
     if(code && platform === 'kick') {
       // Kick PKCE: exchange the code for a token via the local proxy server,
@@ -1942,16 +1973,40 @@ async function pollYouTube(videoId, liveChatId, apiKey, pageToken) {
       const data = await r.json().catch(() => ({}));
       if(!r.ok || data?.error) {
         if(r.status === 401 && useOAuth) {
-          if(!localStorage.getItem('youtube_refresh_token')) {
-            localStorage.removeItem('youtube_access_token');
-            localStorage.removeItem('youtube_token_expiry');
-            S.tokens.youtube = null;
+          // Try a forced refresh if we have a refresh_token. If we don't
+          // (or the refresh itself fails), surface a clear "please
+          // reconnect" message and stop polling so we don't spam the
+          // error forever with an expired bearer token.
+          const hasRefreshToken = !!localStorage.getItem('youtube_refresh_token');
+          let refreshed = '';
+          if(hasRefreshToken) {
+            refreshed = await refreshYouTubeToken(true).catch(() => '');
           }
-          const refreshed = await getYouTubeAccessToken(true).catch(() => '');
           if(refreshed && S.channels.youtube === videoId) {
             pollYouTube(videoId, liveChatId, apiKey, pageToken);
             return null;
           }
+          // Unrecoverable: clear stored YouTube tokens, stop polling,
+          // reset the UI, and ask the user to reconnect.
+          localStorage.removeItem('youtube_access_token');
+          localStorage.removeItem('youtube_refresh_token');
+          localStorage.removeItem('youtube_token_expiry');
+          S.tokens.youtube = null;
+          S.auth.youtube = false;
+          S.channels.youtube = null;
+          if(S.intervals.youtube) {
+            clearTimeout(S.intervals.youtube);
+            S.intervals.youtube = null;
+          }
+          try { resetConnectBtn('youtube'); } catch(_) {}
+          try {
+            document.getElementById('row-youtube').className = 'oauth-row';
+            document.getElementById('sd-youtube').className = 'status-dot off';
+            document.getElementById('st-youtube').textContent = 'Not connected';
+          } catch(_) {}
+          refreshAccDots(); refreshTargets();
+          addSys('YouTube: your session expired — please click Connect to reauthorize.');
+          return null;
         }
         const msg = data?.error?.message || `HTTP ${r.status}`;
         const code = data?.error?.code ? ` (${data.error.code})` : '';
