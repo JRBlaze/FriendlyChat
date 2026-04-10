@@ -1,6 +1,10 @@
 // Friendly Chat - Proxy Server
 // Deploy this to Railway, Render, or any Node.js host.
-// Set environment variables: KICK_CLIENT_ID, KICK_CLIENT_SECRET, YOUTUBE_API_KEY
+// Set environment variables:
+//   KICK_CLIENT_ID, KICK_CLIENT_SECRET      (required — Kick OAuth)
+//   YOUTUBE_API_KEY                         (optional — YouTube Data API key)
+//   YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET (required for YouTube OAuth —
+//     Google requires a client_secret even for PKCE flows)
 //
 // Railway: railway.app
 //   1. Create account at railway.app
@@ -10,11 +14,13 @@
 
 const http = require('http');
 
-const KICK_CLIENT_ID     = process.env.KICK_CLIENT_ID     || '';
-const KICK_CLIENT_SECRET = process.env.KICK_CLIENT_SECRET || '';
-const YOUTUBE_API_KEY    = process.env.YOUTUBE_API_KEY    || '';
-const ALLOWED_ORIGIN     = process.env.ALLOWED_ORIGIN     || '*';
-const PORT               = process.env.PORT               || 3000;
+const KICK_CLIENT_ID        = process.env.KICK_CLIENT_ID        || '';
+const KICK_CLIENT_SECRET    = process.env.KICK_CLIENT_SECRET    || '';
+const YOUTUBE_API_KEY       = process.env.YOUTUBE_API_KEY       || '';
+const YOUTUBE_CLIENT_ID     = process.env.YOUTUBE_CLIENT_ID     || '';
+const YOUTUBE_CLIENT_SECRET = process.env.YOUTUBE_CLIENT_SECRET || '';
+const ALLOWED_ORIGIN        = process.env.ALLOWED_ORIGIN        || '*';
+const PORT                  = process.env.PORT                  || 3000;
 
 if(!KICK_CLIENT_ID || !KICK_CLIENT_SECRET) {
   console.error('ERROR: KICK_CLIENT_ID and KICK_CLIENT_SECRET env vars must be set.');
@@ -53,10 +59,101 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Returns the YouTube API key (stored securely as an env var, never in the repo)
+  // Returns the YouTube API key + client ID (client ID is a public identifier;
+  // API key is stored as an env var and never committed to the repo).
   if(url.pathname === '/youtube-config' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ api_key: YOUTUBE_API_KEY }));
+    res.end(JSON.stringify({
+      api_key: YOUTUBE_API_KEY,
+      client_id: YOUTUBE_CLIENT_ID,
+      has_client_secret: !!YOUTUBE_CLIENT_SECRET,
+    }));
+    return;
+  }
+
+  // Exchanges a YouTube OAuth code (PKCE) for access + refresh tokens.
+  // Google requires the client_secret even for PKCE flows, so the proxy holds
+  // it on behalf of the app.
+  if(url.pathname === '/youtube-token' && req.method === 'POST') {
+    try {
+      if(!YOUTUBE_CLIENT_SECRET) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Proxy YOUTUBE_CLIENT_SECRET not configured' }));
+        return;
+      }
+      const { code, code_verifier, redirect_uri, client_id } = await readBody(req);
+      const params = new URLSearchParams({
+        grant_type:    'authorization_code',
+        client_id:     YOUTUBE_CLIENT_ID || client_id || '',
+        client_secret: YOUTUBE_CLIENT_SECRET,
+        redirect_uri:  redirect_uri,
+        code_verifier,
+        code,
+      });
+      const ytRes = await fetch('https://oauth2.googleapis.com/token', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body:    params.toString(),
+      });
+      const data = await ytRes.json().catch(() => ({}));
+      if(!ytRes.ok || data.error) {
+        res.writeHead(ytRes.status || 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          error: data.error_description || data.error || 'YouTube token exchange failed',
+        }));
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        access_token:  data.access_token,
+        refresh_token: data.refresh_token,
+        expires_in:    data.expires_in,
+      }));
+    } catch(e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
+  // Silently refreshes an expired YouTube access token.
+  if(url.pathname === '/youtube-refresh' && req.method === 'POST') {
+    try {
+      if(!YOUTUBE_CLIENT_SECRET) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Proxy YOUTUBE_CLIENT_SECRET not configured' }));
+        return;
+      }
+      const { refresh_token, client_id } = await readBody(req);
+      const params = new URLSearchParams({
+        grant_type:    'refresh_token',
+        client_id:     YOUTUBE_CLIENT_ID || client_id || '',
+        client_secret: YOUTUBE_CLIENT_SECRET,
+        refresh_token,
+      });
+      const ytRes = await fetch('https://oauth2.googleapis.com/token', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body:    params.toString(),
+      });
+      const data = await ytRes.json().catch(() => ({}));
+      if(!ytRes.ok || data.error || !data.access_token) {
+        res.writeHead(ytRes.status || 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          error: data.error_description || data.error || 'YouTube token refresh failed',
+        }));
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        access_token:  data.access_token,
+        refresh_token: data.refresh_token || refresh_token,
+        expires_in:    data.expires_in,
+      }));
+    } catch(e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: e.message }));
+    }
     return;
   }
 

@@ -111,18 +111,43 @@ function start(CFG) {
       return;
     }
 
-    // ── /youtube-token — exchange code for token locally (optional client secret)
+    // ── /youtube-token — exchange code for token ────────────────────────────
+    // Google requires a client_secret even for PKCE flows, so prefer the cloud
+    // proxy (which holds YOUTUBE_CLIENT_SECRET). Fall back to a local exchange
+    // if the user has configured youtube.client_secret in config.json.
     if(pathname === '/youtube-token' && req.method === 'POST') {
       try {
-        const { code, code_verifier, redirect_uri, client_id } = await readBody(req);
-        const youtubeClientId = client_id || CFG.youtube?.client_id || '';
+        const body = await readBody(req);
+        const { code, code_verifier, client_id } = body;
+        const youtubeClientId     = client_id || CFG.youtube?.client_id || '';
         const youtubeClientSecret = CFG.youtube?.client_secret || '';
+        const redirectUri         = body.redirect_uri || `http://localhost:${PORT}/friendly-chat.html`;
+
+        // Preferred path: forward to the cloud proxy.
+        if(HAS_PROXY && !youtubeClientSecret) {
+          const proxyRes = await fetch(`${PROXY_URL}/youtube-token`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({
+              client_id: youtubeClientId,
+              code,
+              code_verifier,
+              redirect_uri: redirectUri,
+            }),
+          });
+          const data = await proxyRes.json().catch(() => ({}));
+          res.writeHead(proxyRes.status, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(data));
+          return;
+        }
+
+        // Local fallback: requires youtube.client_secret in config.json.
         const params = new URLSearchParams({
           grant_type: 'authorization_code',
           client_id: youtubeClientId,
           code_verifier,
           code,
-          redirect_uri: redirect_uri || `http://localhost:${PORT}/friendly-chat.html`,
+          redirect_uri: redirectUri,
         });
         if(youtubeClientSecret) {
           params.set('client_secret', youtubeClientSecret);
@@ -153,12 +178,30 @@ function start(CFG) {
       return;
     }
 
-    // ── /youtube-refresh — refresh token locally (optional client secret) ─────
+    // ── /youtube-refresh — refresh token ─────────────────────────────────────
+    // Same routing as /youtube-token: prefer the cloud proxy, fall back to
+    // local exchange only if config.json has youtube.client_secret.
     if(pathname === '/youtube-refresh' && req.method === 'POST') {
       try {
         const { refresh_token, client_id } = await readBody(req);
-        const youtubeClientId = client_id || CFG.youtube?.client_id || '';
+        const youtubeClientId     = client_id || CFG.youtube?.client_id || '';
         const youtubeClientSecret = CFG.youtube?.client_secret || '';
+
+        if(HAS_PROXY && !youtubeClientSecret) {
+          const proxyRes = await fetch(`${PROXY_URL}/youtube-refresh`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({
+              client_id: youtubeClientId,
+              refresh_token,
+            }),
+          });
+          const data = await proxyRes.json().catch(() => ({}));
+          res.writeHead(proxyRes.status, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(data));
+          return;
+        }
+
         const params = new URLSearchParams({
           grant_type: 'refresh_token',
           client_id: youtubeClientId,

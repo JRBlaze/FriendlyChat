@@ -76,20 +76,32 @@ npm run build:linux  # Linux
 
 ### YouTube OAuth note
 
-If your Google OAuth client is configured as a **Web application**, Google may require a `client_secret` during token exchange.  
-Add it to your local `config.json`:
+Friendly Chat uses OAuth authorization code + PKCE for YouTube so refresh
+tokens can be used for silent renewals. Google's OAuth2 token endpoint still
+requires a `client_secret` during token exchange for every supported client
+type (Web **and** Desktop), so the app has two ways to provide it:
 
-```json
-{
-  "youtube": {
-    "client_id": "YOUR_CLIENT_ID",
-    "client_secret": "YOUR_CLIENT_SECRET"
-  }
-}
-```
+1. **Preferred — use the cloud proxy.** Set `YOUTUBE_CLIENT_ID` and
+   `YOUTUBE_CLIENT_SECRET` as environment variables on your deployed
+   `proxy-server.js` instance. The local server forwards
+   `/youtube-token` and `/youtube-refresh` to the proxy automatically when
+   `proxy_url` is set in `config.json`. The client secret never ships in the
+   app binary.
+2. **Local only (no proxy).** Add `client_secret` directly to your local
+   `config.json`:
 
-Friendly Chat uses OAuth authorization code + PKCE for YouTube so refresh tokens can be used for silent renewals.  
-`client_secret` is optional for OAuth client types that support public clients (PKCE). Some Google OAuth app types (such as Web application) may still require `client_secret` during token exchange.
+   ```json
+   {
+     "youtube": {
+       "client_id": "YOUR_CLIENT_ID",
+       "client_secret": "YOUR_CLIENT_SECRET"
+     }
+   }
+   ```
+
+If neither is configured, token exchange will fail with a
+`client_secret is missing` error from Google and the YouTube connect button
+will remain in the disconnected state.
 
 ---
 

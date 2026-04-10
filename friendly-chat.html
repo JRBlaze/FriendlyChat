@@ -565,11 +565,12 @@ async function exchangeYouTubeCodeForToken(code, codeVerifier) {
       error: data.error || data.error_description || 'unknown'
     });
     const err = data.error_description || data.error || `HTTP ${res.status}`;
-    if(String(err).toLowerCase().includes('client_secret is missing')) {
+    const lowered = String(err).toLowerCase();
+    if(lowered.includes('client_secret is missing') || lowered.includes('client secret not configured') || lowered.includes('youtube_client_secret not configured')) {
       throw new Error(
         YOUTUBE_HAS_CLIENT_SECRET
-          ? 'YouTube rejected the OAuth app configuration. Confirm the Google OAuth client type and redirect URI.'
-          : 'YouTube OAuth for this app type requires a client secret. Use an OAuth client type that supports PKCE/public clients (for example Desktop) or add youtube.client_secret to config.json.'
+          ? 'YouTube rejected the OAuth app configuration. Confirm the Google OAuth client ID and redirect URI.'
+          : 'YouTube OAuth requires a client secret. Either deploy the proxy with YOUTUBE_CLIENT_ID/YOUTUBE_CLIENT_SECRET env vars, or add youtube.client_secret to config.json.'
       );
     }
     throw new Error(err);
