@@ -138,22 +138,59 @@ function start(CFG) {
     // ── /kick-mod — uses user's own access token, no secret needed ───────────
     if(pathname === '/kick-mod' && req.method === 'POST') {
       try {
-        const { token, broadcasterId, action, username, duration, permanent } = await readBody(req);
-        const url  = `https://api.kick.com/public/v1/channels/${broadcasterId}/bans`;
-        const body = permanent ? { username } : { username, duration };
-        const kickRes = await fetch(url, {
-          method:  'POST',
+        const { token, broadcasterId, action, username, duration, messageId } = await readBody(req);
+
+        if(action === 'delete') {
+          const deleteRes = await fetch(`https://api.kick.com/public/v1/chat/${messageId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` },
+          });
+          const deleteData = await deleteRes.json().catch(() => ({}));
+          if(!deleteRes.ok) {
+            res.writeHead(deleteRes.status, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: deleteData.message || 'delete action failed' }));
+            return;
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+          return;
+        }
+
+        // Resolve user_id from username when needed.
+        let targetUserId = null;
+        if(username) {
+          const channelLookup = await fetch(`https://kick.com/api/v1/channels/${encodeURIComponent(username)}`);
+          if(channelLookup.ok) {
+            const channelData = await channelLookup.json().catch(() => ({}));
+            targetUserId = Number(channelData.user_id) || null;
+          }
+        }
+
+        // Kick moderation API accepts duration in minutes for timeout.
+        const timeoutMinutes = Math.max(1, Math.ceil((Number(duration) || 0) / 60));
+        const modBody = { broadcaster_user_id: Number(broadcasterId) };
+        if(targetUserId) modBody.user_id = targetUserId;
+        if(action === 'timeout') modBody.duration = timeoutMinutes;
+        if(!modBody.user_id) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Could not resolve user ID for moderation target' }));
+          return;
+        }
+
+        const method = action === 'unban' ? 'DELETE' : 'POST';
+        const modRes = await fetch('https://api.kick.com/public/v1/moderation/bans', {
+          method,
           headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body:    JSON.stringify(body),
+          body: JSON.stringify(modBody),
         });
-        const data = await kickRes.json().catch(() => ({}));
-        if(!kickRes.ok) {
-          res.writeHead(kickRes.status, { 'Content-Type': 'application/json' });
+        const data = await modRes.json().catch(() => ({}));
+        if(!modRes.ok) {
+          res.writeHead(modRes.status, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: data.message || 'mod action failed' }));
           return;
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true }));
+        res.end(JSON.stringify({ ok: true, action }));
       } catch(e) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: e.message }));

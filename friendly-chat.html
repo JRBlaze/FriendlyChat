@@ -338,7 +338,7 @@ async function loadConfig(retries = 5, delayMs = 800) {
         hasKickClientId: !!KICK_CLIENT_ID_PUB,
         hasTwitchClientId: !!TWITCH_CLIENT_ID
       });
-      CFG.twitch.url = `https://id.twitch.tv/oauth2/authorize?client_id=${TWITCH_CLIENT_ID}&scope=chat%3Aread+chat%3Aedit+user%3Awrite%3Achat+moderator%3Amanage%3Abanned_users+moderator%3Amanage%3Achat_messages+user%3Aread%3Aemotes&response_type=token`;
+      CFG.twitch.url = `https://id.twitch.tv/oauth2/authorize?client_id=${TWITCH_CLIENT_ID}&scope=chat%3Aread+chat%3Aedit+user%3Awrite%3Achat+moderator%3Amanage%3Abanned_users+moderator%3Amanage%3Achat_messages+moderator%3Aread%3Afollowers+user%3Aread%3Aemotes&response_type=token`;
       return;
     } catch(e) {
       dbg('config', `Attempt ${attempt} failed`, e.message);
@@ -725,7 +725,7 @@ async function startKickOAuth() {
     + `?response_type=code`
     + `&client_id=${clientId}`
     + `&redirect_uri=${redirectUri}`
-    + `&scope=user%3Aread+channel%3Aread+chat%3Awrite`
+    + `&scope=user%3Aread+channel%3Aread+chat%3Awrite+moderation%3Aban+moderation%3Achat_message%3Amanage`
     + `&code_challenge=${challenge}`
     + `&code_challenge_method=S256`
     + `&state=${state}`;
@@ -1188,9 +1188,10 @@ function connectTwitch(channel) {
 
       if(S.channels.twitch === channel) {
         const badgeHtml = renderTwitchBadges(tags['badges'] || '');
-        const msgEl = addMsg('twitch', displayName, text, badgeClass, emoteMap, null, badgeHtml);
-        // Store the message ID so moderation delete can reference it
-        if(msgEl && tags['id']) msgEl.dataset.msgId = tags['id'];
+        addMsg('twitch', displayName, text, badgeClass, emoteMap, null, badgeHtml, {
+          messageId: tags['id'] || null,
+          userId: tags['user-id'] || null,
+        });
       }
     });
   };
@@ -1292,7 +1293,12 @@ function connectKick(channel, reconnectAttempt = 0) {
         }
 
         // Kick sends emotes as inline [emote:id:name] tokens inside the content string
-        if(S.channels.kick === channel) addMsg('kick', sender, text, badgeClass, null, null, kickBadgeHtml);
+        if(S.channels.kick === channel) {
+          addMsg('kick', sender, text, badgeClass, null, null, kickBadgeHtml, {
+            messageId: payload.id || payload.message_id || null,
+            userId: payload.sender?.id || payload.sender?.user_id || null,
+          });
+        }
       };
 
       ws.onerror = () => addSys('Kick: connection error');
@@ -1353,7 +1359,10 @@ async function fetchTwitchHistory(channel) {
       const isMod  = tags['mod'] === '1';
       const badge  = isMod ? 'mod' : (isSub ? 'sub' : null);
       const badgeHtml = renderTwitchBadges(tags['badges'] || '');
-      if(text) addMsg('twitch', author, text, badge, null, null, badgeHtml);
+      if(text) addMsg('twitch', author, text, badge, null, null, badgeHtml, {
+        messageId: tags['id'] || null,
+        userId: tags['user-id'] || null,
+      });
     });
   } catch(e) {
     console.warn('Twitch history fetch failed:', e.message);
@@ -1376,7 +1385,10 @@ async function fetchKickHistory(chatroomId) {
       const isMod  = kickBadges.some(b => b.type === 'moderator');
       const kickBadgeHtml = renderKickBadges(kickBadges);
       const badgeClass = isMod && kickBadges.length === 0 ? 'mod' : null;
-      if(text) addMsg('kick', sender, text, badgeClass, null, null, kickBadgeHtml);
+      if(text) addMsg('kick', sender, text, badgeClass, null, null, kickBadgeHtml, {
+        messageId: msg.id || msg.message_id || null,
+        userId: msg.sender?.id || msg.sender?.user_id || msg.metadata?.sender?.id || null,
+      });
     });
   } catch(e) {
     console.warn('Kick history fetch failed:', e.message);
@@ -1785,7 +1797,7 @@ function renderKickBadges(badges = []) {
   return rendered.length ? `<span class="kick-badges">${rendered.join('')}</span>` : '';
 }
 
-function addMsg(p, author, text, badge, emoteMap, _unusedBadgeUrl, authorPrefixHtml) {
+function addMsg(p, author, text, badge, emoteMap, _unusedBadgeUrl, authorPrefixHtml, meta = {}) {
   const feed = document.getElementById('feed');
   const el = document.createElement('div');
   el.className = `msg${!S.filter.has(p) ? ' hide' : ''}`;
@@ -1812,7 +1824,9 @@ function addMsg(p, author, text, badge, emoteMap, _unusedBadgeUrl, authorPrefixH
     bodyHtml = bodyHtml.replace(/(?<=>|^)([^<]+)(?=<|$)/g, seg => linkify(seg));
   }
   const authorPrefix = authorPrefixHtml || '';
-  el.innerHTML = `<div class="m-dot ${p}"></div><span class="m-time">${ftime()}</span><span class="m-author ${p}" data-user="${escapeHtml(author)}" data-platform="${p}" onclick="openUserMenu(event,this)">${authorPrefix}${bdg}${escapeHtml(author)}</span><span class="m-colon">:</span><span class="m-body">${bodyHtml}</span>`;
+  const authorUserIdAttr = meta?.userId ? ` data-user-id="${escapeHtml(String(meta.userId))}"` : '';
+  el.innerHTML = `<div class="m-dot ${p}"></div><span class="m-time">${ftime()}</span><span class="m-author ${p}" data-user="${escapeHtml(author)}" data-platform="${p}"${authorUserIdAttr} onclick="openUserMenu(event,this)">${authorPrefix}${bdg}${escapeHtml(author)}</span><span class="m-colon">:</span><span class="m-body">${bodyHtml}</span>`;
+  if(meta?.messageId) el.dataset.msgId = String(meta.messageId);
 
   // Highlight the message if it mentions the authenticated user's name
   const selfNames = [
@@ -2110,13 +2124,16 @@ function highlightAcItem() {
 // ── User menu (click on a username) ─────────────────────────────────────────
 
 let userMenuPlatform = null, userMenuName = null;
+let userMenuUserId = null;
 
 function openUserMenu(e, el) {
   e.stopPropagation();
   const name     = el.dataset.user;
   const platform = el.dataset.platform;
+  const userId   = el.dataset.userId || null;
   userMenuName     = name;
   userMenuPlatform = platform;
+  userMenuUserId   = userId;
 
   const menu    = document.getElementById('user-menu');
   const nameEl  = document.getElementById('user-menu-name');
@@ -2129,18 +2146,26 @@ function openUserMenu(e, el) {
 
   // Reply — always available
   actions.push({ label: '↩ Reply', fn: `replyToUser('${escapeHtml(name)}')` });
+  actions.push({ label: '👤 User details', fn: `showUserDetails('${platform}','${escapeHtml(name)}','${escapeHtml(userId || '')}')` });
 
   // Moderation — only if authenticated on that platform
   if(platform === 'twitch' && S.auth.twitch) {
     actions.push({ sep: true });
     actions.push({ label: '🗑 Delete last message', fn: `modTwitch('delete','${escapeHtml(name)}')` });
+    actions.push({ label: '🧹 Purge (1s)', fn: `modTwitch('timeout','${escapeHtml(name)}',1)`, danger: true });
     actions.push({ label: '⏱ Timeout 60s', fn: `modTwitch('timeout','${escapeHtml(name)}',60)`, danger: true });
     actions.push({ label: '⏱ Timeout 10m', fn: `modTwitch('timeout','${escapeHtml(name)}',600)`, danger: true });
+    actions.push({ label: '⏱ Timeout custom…', fn: `modTwitchCustomTimeout('${escapeHtml(name)}')`, danger: true });
+    actions.push({ label: '♻️ Unban/untimeout', fn: `modTwitch('unban','${escapeHtml(name)}')` });
     actions.push({ label: '🔨 Ban', fn: `modTwitch('ban','${escapeHtml(name)}')`, danger: true });
   }
   if(platform === 'kick' && S.auth.kick) {
     actions.push({ sep: true });
+    actions.push({ label: '🗑 Delete last message', fn: `modKick('delete','${escapeHtml(name)}')`, danger: true });
+    actions.push({ label: '🧹 Purge (1m)', fn: `modKick('timeout','${escapeHtml(name)}',1)`, danger: true });
     actions.push({ label: '⏱ Timeout 60s', fn: `modKick('timeout','${escapeHtml(name)}',60)`, danger: true });
+    actions.push({ label: '⏱ Timeout custom…', fn: `modKickCustomTimeout('${escapeHtml(name)}')`, danger: true });
+    actions.push({ label: '♻️ Unban/untimeout', fn: `modKick('unban','${escapeHtml(name)}')` });
     actions.push({ label: '🔨 Ban', fn: `modKick('ban','${escapeHtml(name)}')`, danger: true });
   }
 
@@ -2161,6 +2186,7 @@ function openUserMenu(e, el) {
 function closeUserMenu() {
   document.getElementById('user-menu').classList.add('hidden');
   userMenuName = null; userMenuPlatform = null;
+  userMenuUserId = null;
 }
 
 function replyToUser(name) {
@@ -2170,7 +2196,127 @@ function replyToUser(name) {
   input.setSelectionRange(input.value.length, input.value.length);
 }
 
+function formatDateTime(iso) {
+  if(!iso) return 'Unknown';
+  const d = new Date(iso);
+  if(Number.isNaN(d.getTime())) return String(iso);
+  return d.toLocaleString();
+}
+
+function collectLocalUserMessages(platform, username, max = 8) {
+  const lower = String(username || '').toLowerCase();
+  const list = [...document.querySelectorAll(`.msg[data-platform="${platform}"]`)]
+    .filter(m => m.querySelector('.m-author')?.dataset.user?.toLowerCase() === lower)
+    .slice(-max)
+    .map(m => {
+      const body = m.querySelector('.m-body')?.textContent?.trim() || '';
+      return body;
+    })
+    .filter(Boolean);
+  return list;
+}
+
+async function showUserDetails(platform, username, preferredUserId = '') {
+  addSys(`[${platform.toUpperCase()}] Loading details for ${username}...`);
+  const localMessages = collectLocalUserMessages(platform, username, 8);
+
+  if(platform === 'twitch') {
+    await showTwitchUserDetails(username, localMessages);
+  } else if(platform === 'kick') {
+    await showKickUserDetails(username, preferredUserId, localMessages);
+  }
+}
+
+async function showTwitchUserDetails(username, localMessages = []) {
+  const token = S.tokens.twitch;
+  const clientId = extractClientId(CFG.twitch.url);
+  if(!token || !clientId) { addSys('Twitch: connect your account to load user details'); return; }
+
+  try {
+    const userRes = await fetch(`https://api.twitch.tv/helix/users?login=${encodeURIComponent(username)}`, {
+      headers: { 'Authorization': `Bearer ${token}`, 'Client-Id': clientId }
+    });
+    const userData = await userRes.json();
+    const user = userData.data?.[0];
+    if(!user) { addSys(`Twitch: user "${username}" not found`); return; }
+
+    addSys(`[TWITCH] ${user.display_name || username} — account created ${formatDateTime(user.created_at)}`);
+
+    if(S.twitchBroadcasterId) {
+      try {
+        const followRes = await fetch(
+          `https://api.twitch.tv/helix/channels/followers?broadcaster_id=${S.twitchBroadcasterId}&user_id=${user.id}`,
+          { headers: { 'Authorization': `Bearer ${token}`, 'Client-Id': clientId } }
+        );
+        const followData = await followRes.json();
+        const follow = followData.data?.[0];
+        if(follow?.followed_at) addSys(`[TWITCH] Followed this channel on ${formatDateTime(follow.followed_at)}`);
+        else addSys('[TWITCH] Follow date unavailable (user may not follow this channel or scope may be missing)');
+      } catch(e) {
+        addSys(`[TWITCH] Could not load follow date (${e.message})`);
+      }
+    }
+
+    if(localMessages.length) {
+      addSys(`[TWITCH] Recent local messages from ${username}:`);
+      localMessages.forEach(m => addSys(`  · ${m.slice(0, 220)}`));
+    } else {
+      addSys(`[TWITCH] No local chat history currently loaded for ${username}`);
+    }
+  } catch(e) {
+    addSys(`Twitch user details error: ${e.message}`);
+  }
+}
+
+async function showKickUserDetails(username, preferredUserId = '', localMessages = []) {
+  const token = S.tokens.kick;
+  if(!token) { addSys('Kick: connect your account to load user details'); return; }
+  let targetUserId = preferredUserId || '';
+
+  try {
+    if(!targetUserId) {
+      const candidates = [...document.querySelectorAll('.m-author[data-platform="kick"]')]
+        .find(el => el.dataset.user?.toLowerCase() === username.toLowerCase() && el.dataset.userId);
+      targetUserId = candidates?.dataset.userId || '';
+    }
+
+    let profile = null;
+    if(targetUserId) {
+      const userRes = await fetch(`https://api.kick.com/public/v1/users/${encodeURIComponent(targetUserId)}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if(userRes.ok) {
+        const userData = await userRes.json();
+        profile = userData.data || userData;
+      }
+    }
+
+    const createdAt = profile?.created_at || profile?.createdAt || null;
+    if(createdAt) addSys(`[KICK] ${username} — account created ${formatDateTime(createdAt)}`);
+    else addSys(`[KICK] ${username} — account creation date unavailable from current API response`);
+
+    addSys('[KICK] Follow date is not yet exposed by the current public endpoint used by this app.');
+
+    if(localMessages.length) {
+      addSys(`[KICK] Recent local messages from ${username}:`);
+      localMessages.forEach(m => addSys(`  · ${m.slice(0, 220)}`));
+    } else {
+      addSys(`[KICK] No local chat history currently loaded for ${username}`);
+    }
+  } catch(e) {
+    addSys(`Kick user details error: ${e.message}`);
+  }
+}
+
 // ── Twitch moderation ────────────────────────────────────────────────────────
+
+function modTwitchCustomTimeout(username) {
+  const raw = window.prompt(`Timeout ${username} for how many seconds?`, '300');
+  if(raw === null) return;
+  const seconds = parseInt(raw, 10);
+  if(!Number.isFinite(seconds) || seconds < 1) { showToast('Invalid timeout duration'); return; }
+  modTwitch('timeout', username, seconds);
+}
 
 async function modTwitch(action, username, duration) {
   const token    = S.tokens.twitch;
@@ -2209,6 +2355,14 @@ async function modTwitch(action, username, duration) {
       if(!res.ok) { addSys(`Twitch timeout error: ${d.message || res.status}`); return; }
       addSys(`Timed out ${username} for ${duration}s on Twitch`);
 
+    } else if(action === 'unban') {
+      const res = await fetch(`https://api.twitch.tv/helix/moderation/bans?broadcaster_id=${S.twitchBroadcasterId}&moderator_id=${S.twitchUserId}&user_id=${userId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}`, 'Client-Id': clientId },
+      });
+      if(!res.ok && res.status !== 204) { addSys(`Twitch unban error: ${res.status}`); return; }
+      addSys(`Unbanned/untimeout ${username} on Twitch`);
+
     } else if(action === 'delete') {
       // Find the most recent message element from this user and delete it
       const msgs = [...document.querySelectorAll('.msg[data-platform="twitch"]')];
@@ -2233,16 +2387,26 @@ async function modTwitch(action, username, duration) {
 
 // ── Kick moderation ──────────────────────────────────────────────────────────
 
+function modKickCustomTimeout(username) {
+  const raw = window.prompt(`Timeout ${username} for how many seconds? (Kick API converts to minutes where needed)`, '300');
+  if(raw === null) return;
+  const seconds = parseInt(raw, 10);
+  if(!Number.isFinite(seconds) || seconds < 1) { showToast('Invalid timeout duration'); return; }
+  modKick('timeout', username, seconds);
+}
+
 async function modKick(action, username, duration) {
   const token       = S.tokens.kick;
   const broadcasterId = S.kickBroadcasterId;
   if(!token || !broadcasterId) { addSys('Kick: join a channel first to moderate'); return; }
 
   try {
-    if(action === 'ban' || action === 'timeout') {
+    if(action === 'ban' || action === 'timeout' || action === 'unban') {
       const body = action === 'ban'
         ? { username, permanent: true }
-        : { username, duration };
+        : action === 'unban'
+          ? { username }
+          : { username, duration };
 
       const res = await fetch('/kick-mod', {
         method:  'POST',
@@ -2251,7 +2415,26 @@ async function modKick(action, username, duration) {
       });
       const d = await res.json();
       if(!res.ok) { addSys(`Kick mod error: ${d.error || res.status}`); return; }
-      addSys(`${action === 'ban' ? 'Banned' : `Timed out (${duration}s)`} ${username} on Kick`);
+      if(action === 'ban') addSys(`Banned ${username} on Kick`);
+      if(action === 'timeout') addSys(`Timed out ${username} (${duration}s) on Kick`);
+      if(action === 'unban') addSys(`Unbanned/untimeout ${username} on Kick`);
+      return;
+    }
+
+    if(action === 'delete') {
+      const msgs = [...document.querySelectorAll('.msg[data-platform="kick"]')];
+      const last = msgs.reverse().find(m => m.querySelector('.m-author')?.dataset.user?.toLowerCase() === username.toLowerCase());
+      const msgId = last?.dataset.msgId;
+      if(!msgId) { addSys(`Kick: no recent message ID found for ${username}`); return; }
+      const res = await fetch('/kick-mod', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, broadcasterId, action: 'delete', messageId: msgId })
+      });
+      const d = await res.json();
+      if(!res.ok) { addSys(`Kick delete error: ${d.error || res.status}`); return; }
+      if(last) last.style.opacity = '0.3';
+      addSys(`Deleted message from ${username} on Kick`);
     }
   } catch(ex) {
     addSys(`Kick mod error: ${ex.message}`);
