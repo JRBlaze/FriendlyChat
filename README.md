@@ -77,18 +77,22 @@ npm run build:linux  # Linux
 ### YouTube OAuth note
 
 Friendly Chat uses OAuth authorization code + PKCE for YouTube so refresh
-tokens can be used for silent renewals. Google's OAuth2 token endpoint still
-requires a `client_secret` during token exchange for every supported client
-type (Web **and** Desktop), so the app has two ways to provide it:
+tokens can be used for silent renewals. Google's OAuth2 token endpoint
+requires a `client_secret` during token exchange even for PKCE flows —
+however, Google explicitly documents that the `client_secret` issued to
+**Desktop app** OAuth clients is *not* confidential and is intended to be
+embedded in the distributed app (see
+<https://developers.google.com/identity/protocols/oauth2/native-app>).
 
-1. **Preferred — use the cloud proxy.** Set `YOUTUBE_CLIENT_ID` and
-   `YOUTUBE_CLIENT_SECRET` as environment variables on your deployed
-   `proxy-server.js` instance. The local server forwards
-   `/youtube-token` and `/youtube-refresh` to the proxy automatically when
-   `proxy_url` is set in `config.json`. The client secret never ships in the
-   app binary.
-2. **Local only (no proxy).** Add `client_secret` directly to your local
-   `config.json`:
+Each user signs in with their own Google account, so API quota is per-user
+and is **not** shared — no central service sees your tokens or your
+requests.
+
+**Setup:**
+
+1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials),
+   create an OAuth 2.0 Client ID of type **Desktop app**.
+2. Copy both the `client_id` and the `client_secret` into `config.json`:
 
    ```json
    {
@@ -99,9 +103,18 @@ type (Web **and** Desktop), so the app has two ways to provide it:
    }
    ```
 
-If neither is configured, token exchange will fail with a
-`client_secret is missing` error from Google and the YouTube connect button
-will remain in the disconnected state.
+3. Enable the **YouTube Data API v3** for the same Google Cloud project.
+
+Once connected, the app proactively refreshes the access token a few minutes
+before Google's ~1 hour expiry, so the Connected state — and any joined
+live chat — persists indefinitely without the user re-authorizing. Live
+chat polling is also rate-limited to a 15-second minimum interval, keeping
+the default 10,000-unit daily Data API quota alive for at least 8 hours of
+continuous chat reading.
+
+If `client_id` or `client_secret` is missing from `config.json`, token
+exchange will fail and the YouTube connect button will remain in the
+disconnected state with an inline error explaining what to add.
 
 ---
 

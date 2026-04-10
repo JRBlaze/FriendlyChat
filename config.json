@@ -1,7 +1,8 @@
 {
   "twitch":  { "client_id": "6a1bqli3xxei93r1zu6msidt5xf4kj" },
   "youtube": {
-    "client_id": "211356832757-i9n4qs44tf127b2tidv7uug6ir0g4383.apps.googleusercontent.com"
+    "client_id": "211356832757-i9n4qs44tf127b2tidv7uug6ir0g4383.apps.googleusercontent.com",
+    "client_secret": ""
   },
   "proxy_url": "https://friendly-chat-proxy-production.up.railway.app",
   "port": 8080

@@ -453,7 +453,12 @@ const S = {
   recentChatters: new Map(),
   youtubeSeenIds: new Set(),
   youtubeReadMode: 'auto',
-  youtubeRefreshPromise: null
+  youtubeRefreshPromise: null,
+  // Timer handle for the proactive refresh that keeps the YouTube access
+  // token (and therefore the "Connected" UI state) alive indefinitely —
+  // independent of whether a chat channel is being polled. Without this,
+  // the access token would silently expire after ~1 hour.
+  youtubeRefreshTimer: null
 };
 
 // ALL_PLATFORMS must be defined before S.filter and S.target are initialized
@@ -566,11 +571,11 @@ async function exchangeYouTubeCodeForToken(code, codeVerifier) {
     });
     const err = data.error_description || data.error || `HTTP ${res.status}`;
     const lowered = String(err).toLowerCase();
-    if(lowered.includes('client_secret is missing') || lowered.includes('client secret not configured') || lowered.includes('youtube_client_secret not configured')) {
+    if(lowered.includes('client_secret is missing') || lowered.includes('youtube oauth is not configured') || lowered.includes('client secret')) {
       throw new Error(
         YOUTUBE_HAS_CLIENT_SECRET
-          ? 'YouTube rejected the OAuth app configuration. Confirm the Google OAuth client ID and redirect URI.'
-          : 'YouTube OAuth requires a client secret. Either deploy the proxy with YOUTUBE_CLIENT_ID/YOUTUBE_CLIENT_SECRET env vars, or add youtube.client_secret to config.json.'
+          ? 'YouTube rejected the OAuth app configuration. In Google Cloud Console, confirm the OAuth client is a "Desktop app" type and that the client_id + client_secret in config.json match it.'
+          : 'YouTube OAuth is not configured. In Google Cloud Console, create a "Desktop app" OAuth client and add both its client_id and client_secret to config.json.'
       );
     }
     throw new Error(err);
@@ -622,6 +627,81 @@ async function refreshYouTubeToken(force = false) {
   } finally {
     S.youtubeRefreshPromise = null;
   }
+}
+
+// Schedule a proactive refresh so the YouTube access token (which Google
+// issues with a ~1 hour lifetime) is swapped for a fresh one *before* it
+// expires. This runs regardless of whether the user has joined a chat
+// channel, so simply clicking Connect keeps the session alive indefinitely
+// — not just while pollYouTube is firing.
+//
+// Strategy: fire 5 minutes before the stored expiry. On success, the new
+// expiry is written to localStorage and we reschedule. On failure (refresh
+// token revoked, offline, etc.) we clear the connected state so the user
+// sees they need to reconnect, instead of silently holding a dead token.
+function scheduleYouTubeRefresh() {
+  if(S.youtubeRefreshTimer) {
+    clearTimeout(S.youtubeRefreshTimer);
+    S.youtubeRefreshTimer = null;
+  }
+  if(!localStorage.getItem('youtube_refresh_token')) return;
+
+  const expiry = parseInt(localStorage.getItem('youtube_token_expiry') || '0', 10);
+  // Fire 5 minutes before expiry, but never sooner than 10 seconds and
+  // never later than 55 minutes (safety clamp in case the clock or the
+  // stored expiry is bogus).
+  const leadMs = 5 * 60 * 1000;
+  let delay = expiry > 0 ? (expiry - Date.now() - leadMs) : leadMs;
+  if(delay < 10000) delay = 10000;
+  if(delay > 55 * 60 * 1000) delay = 55 * 60 * 1000;
+
+  dbg('youtube.refresh-timer', 'Scheduled', { delayMs: delay, expiryAt: expiry });
+  S.youtubeRefreshTimer = setTimeout(async () => {
+    S.youtubeRefreshTimer = null;
+    try {
+      const newToken = await refreshYouTubeToken(true);
+      if(newToken) {
+        dbg('youtube.refresh-timer', 'Proactive refresh succeeded');
+        S.tokens.youtube = newToken;
+        scheduleYouTubeRefresh();
+      } else {
+        dbg('youtube.refresh-timer', 'Refresh returned no token — marking disconnected');
+        youtubeSessionLost();
+      }
+    } catch(e) {
+      dbg('youtube.refresh-timer', 'Proactive refresh failed', e?.message || 'unknown');
+      youtubeSessionLost();
+    }
+  }, delay);
+}
+
+// Common teardown path when the YouTube session can no longer be renewed.
+// Stops polling, wipes cached tokens, resets the Connect button, and tells
+// the user to reconnect. Safe to call even if YouTube was never connected.
+function youtubeSessionLost() {
+  if(S.youtubeRefreshTimer) {
+    clearTimeout(S.youtubeRefreshTimer);
+    S.youtubeRefreshTimer = null;
+  }
+  if(S.intervals.youtube) {
+    clearTimeout(S.intervals.youtube);
+    S.intervals.youtube = null;
+  }
+  localStorage.removeItem('youtube_access_token');
+  localStorage.removeItem('youtube_refresh_token');
+  localStorage.removeItem('youtube_token_expiry');
+  S.tokens.youtube = null;
+  S.auth.youtube = false;
+  S.channels.youtube = null;
+  S.youtubeLiveChatId = null;
+  try { resetConnectBtn('youtube'); } catch(_) {}
+  try {
+    document.getElementById('row-youtube').className = 'oauth-row';
+    document.getElementById('sd-youtube').className = 'status-dot off';
+    document.getElementById('st-youtube').textContent = 'Not connected';
+  } catch(_) {}
+  try { refreshAccDots(); refreshTargets(); } catch(_) {}
+  try { addSys('YouTube: your session expired — please click Connect to reauthorize.'); } catch(_) {}
 }
 
 async function getYouTubeAccessToken(forceRefresh = false) {
@@ -1214,6 +1294,9 @@ function markConnected(p, token) {
   document.getElementById(`row-${p}`).className = `oauth-row conn-${p}`;
   document.getElementById(`sd-${p}`).className = 'status-dot on';
   fetchDisplayName(p, token);
+  // Kick off proactive refresh so the ~1 hour YouTube access token never
+  // quietly expires while the user is idle on the Accounts screen.
+  if(p === 'youtube') scheduleYouTubeRefresh();
   // Fetch native emotes for Twitch after connecting (needs user ID first)
   if(p === 'twitch') {
     fetch('https://api.twitch.tv/helix/users', {
@@ -1332,6 +1415,10 @@ function disconnectPlatform(p) {
     localStorage.removeItem('youtube_refresh_token');
     localStorage.removeItem('youtube_token_expiry');
     S.youtubeUserName  = null;
+    if(S.youtubeRefreshTimer) {
+      clearTimeout(S.youtubeRefreshTimer);
+      S.youtubeRefreshTimer = null;
+    }
   }
   if(p === 'kick')    { S.kickUserLogin = null; }
   document.getElementById(`row-${p}`).className = 'oauth-row';
@@ -1987,26 +2074,8 @@ async function pollYouTube(videoId, liveChatId, apiKey, pageToken) {
             pollYouTube(videoId, liveChatId, apiKey, pageToken);
             return null;
           }
-          // Unrecoverable: clear stored YouTube tokens, stop polling,
-          // reset the UI, and ask the user to reconnect.
-          localStorage.removeItem('youtube_access_token');
-          localStorage.removeItem('youtube_refresh_token');
-          localStorage.removeItem('youtube_token_expiry');
-          S.tokens.youtube = null;
-          S.auth.youtube = false;
-          S.channels.youtube = null;
-          if(S.intervals.youtube) {
-            clearTimeout(S.intervals.youtube);
-            S.intervals.youtube = null;
-          }
-          try { resetConnectBtn('youtube'); } catch(_) {}
-          try {
-            document.getElementById('row-youtube').className = 'oauth-row';
-            document.getElementById('sd-youtube').className = 'status-dot off';
-            document.getElementById('st-youtube').textContent = 'Not connected';
-          } catch(_) {}
-          refreshAccDots(); refreshTargets();
-          addSys('YouTube: your session expired — please click Connect to reauthorize.');
+          // Unrecoverable: refresh failed (or there was no refresh token).
+          youtubeSessionLost();
           return null;
         }
         const msg = data?.error?.message || `HTTP ${r.status}`;

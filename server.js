@@ -111,51 +111,42 @@ function start(CFG) {
       return;
     }
 
-    // ── /youtube-token — exchange code for token ────────────────────────────
-    // Google requires a client_secret even for PKCE flows, so prefer the cloud
-    // proxy (which holds YOUTUBE_CLIENT_SECRET). Fall back to a local exchange
-    // if the user has configured youtube.client_secret in config.json.
+    // ── /youtube-token — exchange PKCE auth code for access + refresh tokens
+    // Google's Desktop (installed-app) OAuth client type issues a client_secret
+    // that is explicitly *not* confidential — it must be shipped with the app
+    // alongside the client_id. See:
+    //   https://developers.google.com/identity/protocols/oauth2/native-app
+    // The user supplies both values in config.json; this handler forwards the
+    // PKCE exchange directly to Google so each user gets their own access and
+    // refresh tokens tied to their own Google account / API quota.
     if(pathname === '/youtube-token' && req.method === 'POST') {
       try {
         const body = await readBody(req);
-        const { code, code_verifier, client_id } = body;
-        const youtubeClientId     = client_id || CFG.youtube?.client_id || '';
+        const { code, code_verifier } = body;
+        const youtubeClientId     = CFG.youtube?.client_id     || '';
         const youtubeClientSecret = CFG.youtube?.client_secret || '';
         const redirectUri         = body.redirect_uri || `http://localhost:${PORT}/friendly-chat.html`;
 
-        // Preferred path: forward to the cloud proxy.
-        if(HAS_PROXY && !youtubeClientSecret) {
-          const proxyRes = await fetch(`${PROXY_URL}/youtube-token`, {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({
-              client_id: youtubeClientId,
-              code,
-              code_verifier,
-              redirect_uri: redirectUri,
-            }),
-          });
-          const data = await proxyRes.json().catch(() => ({}));
-          res.writeHead(proxyRes.status, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(data));
+        if(!youtubeClientId || !youtubeClientSecret) {
+          res.writeHead(503, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            error: 'YouTube OAuth is not configured. Add youtube.client_id and youtube.client_secret to config.json (create a "Desktop app" OAuth client in Google Cloud Console).',
+          }));
           return;
         }
 
-        // Local fallback: requires youtube.client_secret in config.json.
         const params = new URLSearchParams({
-          grant_type: 'authorization_code',
-          client_id: youtubeClientId,
+          grant_type:    'authorization_code',
+          client_id:     youtubeClientId,
+          client_secret: youtubeClientSecret,
           code_verifier,
           code,
-          redirect_uri: redirectUri,
+          redirect_uri:  redirectUri,
         });
-        if(youtubeClientSecret) {
-          params.set('client_secret', youtubeClientSecret);
-        }
         const ytRes = await fetch('https://oauth2.googleapis.com/token', {
-          method: 'POST',
+          method:  'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: params.toString(),
+          body:    params.toString(),
         });
         const data = await ytRes.json().catch(() => ({}));
         if(!ytRes.ok || data.error) {
@@ -167,9 +158,9 @@ function start(CFG) {
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
-          access_token: data.access_token,
+          access_token:  data.access_token,
           refresh_token: data.refresh_token,
-          expires_in: data.expires_in,
+          expires_in:    data.expires_in,
         }));
       } catch(e) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -178,42 +169,34 @@ function start(CFG) {
       return;
     }
 
-    // ── /youtube-refresh — refresh token ─────────────────────────────────────
-    // Same routing as /youtube-token: prefer the cloud proxy, fall back to
-    // local exchange only if config.json has youtube.client_secret.
+    // ── /youtube-refresh — swap a refresh_token for a new access_token ──────
+    // Called automatically before the access token expires so the connected
+    // UI state and any active chat polling survive indefinitely without
+    // forcing the user to re-authorize every hour.
     if(pathname === '/youtube-refresh' && req.method === 'POST') {
       try {
-        const { refresh_token, client_id } = await readBody(req);
-        const youtubeClientId     = client_id || CFG.youtube?.client_id || '';
+        const { refresh_token } = await readBody(req);
+        const youtubeClientId     = CFG.youtube?.client_id     || '';
         const youtubeClientSecret = CFG.youtube?.client_secret || '';
 
-        if(HAS_PROXY && !youtubeClientSecret) {
-          const proxyRes = await fetch(`${PROXY_URL}/youtube-refresh`, {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({
-              client_id: youtubeClientId,
-              refresh_token,
-            }),
-          });
-          const data = await proxyRes.json().catch(() => ({}));
-          res.writeHead(proxyRes.status, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(data));
+        if(!youtubeClientId || !youtubeClientSecret) {
+          res.writeHead(503, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            error: 'YouTube OAuth is not configured. Add youtube.client_id and youtube.client_secret to config.json.',
+          }));
           return;
         }
 
         const params = new URLSearchParams({
-          grant_type: 'refresh_token',
-          client_id: youtubeClientId,
+          grant_type:    'refresh_token',
+          client_id:     youtubeClientId,
+          client_secret: youtubeClientSecret,
           refresh_token,
         });
-        if(youtubeClientSecret) {
-          params.set('client_secret', youtubeClientSecret);
-        }
         const ytRes = await fetch('https://oauth2.googleapis.com/token', {
-          method: 'POST',
+          method:  'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: params.toString(),
+          body:    params.toString(),
         });
         const data = await ytRes.json().catch(() => ({}));
         if(!ytRes.ok || data.error || !data.access_token) {
@@ -225,9 +208,9 @@ function start(CFG) {
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
-          access_token: data.access_token,
+          access_token:  data.access_token,
           refresh_token: data.refresh_token || refresh_token,
-          expires_in: data.expires_in,
+          expires_in:    data.expires_in,
         }));
       } catch(e) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
