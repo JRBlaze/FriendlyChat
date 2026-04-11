@@ -1112,9 +1112,10 @@ function connectTwitch(channel) {
         // Fetch recent chat history from the robotty recent-messages service
         // (same service used by Chatterino2)
         fetchTwitchHistory(channel);
-        // Fetch 7TV/BTTV global emotes immediately
-        fetchThirdPartyEmotes('twitch', channel, S.twitchUserId || null);
-        // Fetch broadcaster ID then pull global + channel emotes
+        // Fetch broadcaster ID, then load badges, native emotes, and 3rd-party emotes.
+        // 3rd-party emotes (BTTV/7TV) require the broadcaster's Twitch user ID — NOT the
+        // logged-in viewer's ID — so we must wait for this lookup before calling
+        // fetchThirdPartyEmotes to ensure channel-specific emotes load correctly.
         const clientId = TWITCH_CLIENT_ID || extractClientId(CFG.twitch.url);
         const authHeader = S.tokens.twitch ? `Bearer ${S.tokens.twitch}` : null;
         if(clientId && authHeader) {
@@ -1129,14 +1130,17 @@ function connectTwitch(channel) {
             }
             fetchTwitchBadges();
             fetchTwitchNativeEmotes();
+            fetchThirdPartyEmotes('twitch', channel, S.twitchBroadcasterId);
           })
           .catch(() => {
             fetchTwitchBadges();
             fetchTwitchNativeEmotes();
+            fetchThirdPartyEmotes('twitch', channel, null);
           });
         } else {
           fetchTwitchBadges();
           fetchTwitchNativeEmotes();
+          fetchThirdPartyEmotes('twitch', channel, null);
         }
         return;
       }
