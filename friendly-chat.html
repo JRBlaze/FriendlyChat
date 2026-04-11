@@ -1135,12 +1135,17 @@ function connectTwitch(channel) {
           .catch(() => {
             fetchTwitchBadges();
             fetchTwitchNativeEmotes();
-            fetchThirdPartyEmotes('twitch', channel, null);
+            // S.twitchBroadcasterId may have been populated by ROOMSTATE already;
+            // use it as a fallback so 7TV/BTTV channel emotes still load.
+            fetchThirdPartyEmotes('twitch', channel, S.twitchBroadcasterId || null);
           });
         } else {
           fetchTwitchBadges();
           fetchTwitchNativeEmotes();
-          fetchThirdPartyEmotes('twitch', channel, null);
+          // Anonymous path: ROOMSTATE has already set S.twitchBroadcasterId by
+          // the time End-of-NAMES fires, so we can pass it to unlock channel-
+          // specific 7TV/BTTV emotes even without a user OAuth token.
+          fetchThirdPartyEmotes('twitch', channel, S.twitchBroadcasterId || null);
         }
         return;
       }
@@ -1413,6 +1418,50 @@ async function fetchKickHistory(chatroomId) {
 }
 
 // ── Native emote fetching (Twitch + Kick channel emotes) ─────────────────────
+//
+// Design notes:
+// - Each fetcher mutates S.nativeEmotes.twitch DIRECTLY rather than taking a
+//   snapshot at entry and writing back at exit. The snapshot-and-overwrite
+//   pattern caused a race: two fetchers running concurrently would each
+//   commit their own (partial) snapshot at the end, so whichever finished
+//   last wiped out emotes the other had just added.
+// - Fetchers are split by source (global / channel / user / emote-sets) so
+//   each one can be called independently and they stay idempotent.
+// - After any fetcher finishes, refreshEmotePickerIfOpen() re-renders the
+//   picker so newly loaded emotes appear without the user having to close
+//   and reopen it.
+
+// Helper: derive a human-readable source label for a Helix emote record.
+// Returns null if the record has no emote_type/owner_id info so the caller
+// can substitute a fallback label.
+function twitchEmoteSourceLabel(e) {
+  if(e.emote_type === 'subscriptions') return 'Twitch Sub';
+  if(e.emote_type === 'follower')      return 'Twitch Follow';
+  if(e.emote_type === 'bitstier')      return 'Twitch Bits';
+  if(e.emote_type === 'globals' || e.owner_id === '0') return 'Twitch Global';
+  if(e.emote_type || e.owner_id !== undefined)         return 'Twitch';
+  return null;
+}
+
+// Helper: add one Helix emote record into the Twitch native store.
+function addTwitchEmote(e, fallbackSource) {
+  if(!e?.name || !e?.id) return;
+  S.nativeEmotes.twitch[e.name] = {
+    url: `https://static-cdn.jtvnw.net/emoticons/v2/${e.id}/default/dark/1.0`,
+    source: twitchEmoteSourceLabel(e) || fallbackSource || 'Twitch'
+  };
+}
+
+// Refresh the emote picker popup in place if the user has it open, so newly
+// loaded emotes show up immediately instead of after a close/reopen.
+function refreshEmotePickerIfOpen() {
+  const popup = document.getElementById('autocomplete-popup');
+  if(popup && popup.classList.contains('visible') && popup.dataset.mode === 'browse') {
+    // Close then reopen to re-render with the updated stores
+    closeAutocomplete();
+    toggleEmotePicker();
+  }
+}
 
 // Fetches Twitch emotes by emote set IDs received from USERSTATE.
 // This is how Chatterino loads user-specific emotes including sub and follower emotes.
@@ -1421,105 +1470,118 @@ async function fetchTwitchEmoteSets(setIds) {
   const clientId = TWITCH_CLIENT_ID || extractClientId(CFG.twitch.url);
   if(!token || !clientId || !setIds?.length) return;
 
-  const store = { ...S.nativeEmotes.twitch };
   // Fetch up to 25 set IDs per request (Helix limit)
   const chunks = [];
   for(let i = 0; i < setIds.length; i += 25) chunks.push(setIds.slice(i, i + 25));
 
+  let added = 0;
   try {
     for(const chunk of chunks) {
       const params = chunk.map(id => `emote_set_id=${id}`).join('&');
       const res = await fetch(`https://api.twitch.tv/helix/chat/emotes/set?${params}`, {
         headers: { 'Authorization': `Bearer ${token}`, 'Client-Id': clientId }
       });
-      if(!res.ok) { console.warn('Emote set fetch failed:', res.status); continue; }
+      if(!res.ok) { console.warn('Twitch emote-set fetch failed:', res.status); continue; }
       const data = await res.json();
-      (data.data || []).forEach(e => {
-        const label = e.owner_id === '0'     ? 'Twitch Global'
-                    : e.emote_type === 'subscriptions' ? 'Twitch Sub'
-                    : e.emote_type === 'follower'       ? 'Twitch Follow'
-                    : 'Twitch';
-        store[e.name] = {
-          url: `https://static-cdn.jtvnw.net/emoticons/v2/${e.id}/default/dark/1.0`,
-          source: label
-        };
-      });
+      (data.data || []).forEach(e => { addTwitchEmote(e); added++; });
     }
-    if(Object.keys(store).length > 0) {
-      S.nativeEmotes.twitch = store;
-      addSys(`Loaded ${Object.keys(store).length} Twitch emotes`);
+    if(added > 0) {
+      console.log(`Twitch emote-sets: added/refreshed ${added} emotes (total ${Object.keys(S.nativeEmotes.twitch).length})`);
+      refreshEmotePickerIfOpen();
     }
   } catch(ex) {
     console.warn('fetchTwitchEmoteSets error:', ex.message);
   }
 }
 
-async function fetchTwitchNativeEmotes() {
+// Global Twitch emotes — available to everyone, no special scope needed.
+async function fetchTwitchGlobalEmotes() {
   const token    = S.tokens.twitch;
   const clientId = TWITCH_CLIENT_ID || extractClientId(CFG.twitch.url);
-  if(!token || !clientId) { console.warn('Twitch: no token or clientId for emote fetch'); return; }
-
-  const headers = { 'Authorization': `Bearer ${token}`, 'Client-Id': clientId };
-  // Start from the existing store so emotes loaded by fetchTwitchEmoteSets (via USERSTATE)
-  // are preserved rather than overwritten when this function completes after them.
-  const store   = { ...S.nativeEmotes.twitch };
+  if(!clientId) return;
+  const headers = { 'Client-Id': clientId };
+  if(token) headers['Authorization'] = `Bearer ${token}`;
 
   try {
-    // 1. Global Twitch emotes — public, no special scope needed
-    const globalRes = await fetch('https://api.twitch.tv/helix/chat/emotes/global', { headers });
-    if(globalRes.ok) {
-      const globalData = await globalRes.json();
-      (globalData.data || []).forEach(e => {
-        store[e.name] = {
-          url: `https://static-cdn.jtvnw.net/emoticons/v2/${e.id}/default/dark/1.0`,
-          source: 'Twitch Global'
-        };
-      });
-    }
+    const res = await fetch('https://api.twitch.tv/helix/chat/emotes/global', { headers });
+    if(!res.ok) { console.warn('Twitch global emotes fetch failed:', res.status); return; }
+    const data = await res.json();
+    (data.data || []).forEach(e => addTwitchEmote(e, 'Twitch Global'));
+    console.log(`Twitch: loaded ${(data.data || []).length} global emotes`);
+    refreshEmotePickerIfOpen();
+  } catch(e) {
+    console.warn('Twitch global emotes error:', e.message);
+  }
+}
 
-    // 2. Channel emotes for the channel being watched — public, no special scope needed
-    if(S.twitchBroadcasterId) {
-      const chanRes = await fetch(`https://api.twitch.tv/helix/chat/emotes?broadcaster_id=${S.twitchBroadcasterId}`, { headers });
-      if(chanRes.ok) {
-        const chanData = await chanRes.json();
-        (chanData.data || []).forEach(e => {
-          store[e.name] = {
-            url: `https://static-cdn.jtvnw.net/emoticons/v2/${e.id}/default/dark/1.0`,
-            source: 'Twitch Channel'
-          };
-        });
+// Channel-specific Twitch emotes — returns all emotes belonging to the
+// channel (sub, follower, bits). Available to anyone with read access, but
+// not all of them are USABLE by every viewer. They are included anyway so
+// incoming chat messages render correctly and so subscribers see their sub
+// emotes in the picker.
+async function fetchTwitchChannelEmotes(broadcasterId) {
+  const token    = S.tokens.twitch;
+  const clientId = TWITCH_CLIENT_ID || extractClientId(CFG.twitch.url);
+  if(!clientId || !broadcasterId) return;
+  const headers = { 'Client-Id': clientId };
+  if(token) headers['Authorization'] = `Bearer ${token}`;
+
+  try {
+    const res = await fetch(`https://api.twitch.tv/helix/chat/emotes?broadcaster_id=${broadcasterId}`, { headers });
+    if(!res.ok) { console.warn('Twitch channel emotes fetch failed:', res.status); return; }
+    const data = await res.json();
+    (data.data || []).forEach(e => addTwitchEmote(e, 'Twitch Channel'));
+    console.log(`Twitch: loaded ${(data.data || []).length} channel emotes for ${broadcasterId}`);
+    refreshEmotePickerIfOpen();
+  } catch(e) {
+    console.warn('Twitch channel emotes error:', e.message);
+  }
+}
+
+// User emotes — requires user:read:emotes scope. Returns EVERY emote the
+// authenticated user has permission to use across every channel they
+// subscribe to or follow, plus global + Turbo/Prime. Paginated.
+async function fetchTwitchUserEmotes() {
+  const token    = S.tokens.twitch;
+  const clientId = TWITCH_CLIENT_ID || extractClientId(CFG.twitch.url);
+  if(!token || !clientId || !S.twitchUserId) return;
+  const headers = { 'Authorization': `Bearer ${token}`, 'Client-Id': clientId };
+
+  let cursor = '';
+  let total  = 0;
+  try {
+    do {
+      const qs = `user_id=${S.twitchUserId}${cursor ? `&after=${cursor}` : ''}`;
+      const res = await fetch(`https://api.twitch.tv/helix/chat/emotes/user?${qs}`, { headers });
+      if(!res.ok) {
+        console.warn('Twitch user emotes fetch failed:', res.status);
+        break;
       }
-    }
-
-    // 3. User emotes — requires user:read:emotes scope.
-    // Follows pagination cursors so users with many subscriptions/follows get all their emotes.
-    if(S.twitchUserId) {
-      let cursor = '';
-      do {
-        const qs = `user_id=${S.twitchUserId}${cursor ? `&after=${cursor}` : ''}`;
-        const userRes = await fetch(`https://api.twitch.tv/helix/chat/emotes/user?${qs}`, { headers });
-        if(!userRes.ok) break;
-        const userData = await userRes.json();
-        (userData.data || []).forEach(e => {
-          const label = e.emote_type === 'subscriptions' ? 'Twitch Sub'
-                      : e.emote_type === 'follower'      ? 'Twitch Follow'
-                      : 'Twitch Global';
-          store[e.name] = {
-            url: `https://static-cdn.jtvnw.net/emoticons/v2/${e.id}/default/dark/1.0`,
-            source: label
-          };
-        });
-        cursor = userData.pagination?.cursor || '';
-      } while(cursor);
-    }
-
-    if(Object.keys(store).length > 0) {
-      S.nativeEmotes.twitch = store;
-      addSys(`Loaded ${Object.keys(store).length} Twitch emotes`);
+      const data = await res.json();
+      (data.data || []).forEach(e => { addTwitchEmote(e); total++; });
+      cursor = data.pagination?.cursor || '';
+    } while(cursor);
+    console.log(`Twitch: loaded ${total} user-accessible emotes (subs/follows/global)`);
+    if(total > 0) {
+      addSys(`Loaded ${total} of your Twitch emotes (subs, follows, global)`);
+      refreshEmotePickerIfOpen();
     }
   } catch(e) {
-    console.warn('Twitch emote fetch error:', e.message);
+    console.warn('Twitch user emotes error:', e.message);
   }
+}
+
+// Backwards-compatible entry point used in several places. Triggers all of
+// the fetches in parallel; each mutates the shared store directly so races
+// are harmless.
+async function fetchTwitchNativeEmotes() {
+  const clientId = TWITCH_CLIENT_ID || extractClientId(CFG.twitch.url);
+  if(!clientId) { console.warn('Twitch: no clientId for emote fetch'); return; }
+
+  const jobs = [fetchTwitchGlobalEmotes()];
+  if(S.twitchBroadcasterId) jobs.push(fetchTwitchChannelEmotes(S.twitchBroadcasterId));
+  if(S.twitchUserId)        jobs.push(fetchTwitchUserEmotes());
+  await Promise.all(jobs);
 }
 
 // Kick emotes are fetched via a hidden Electron BrowserWindow (see main.js).
