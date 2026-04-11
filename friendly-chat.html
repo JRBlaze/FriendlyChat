@@ -1074,6 +1074,12 @@ function connectTwitch(channel) {
   S.sockets.twitch = ws;
 
   ws.onopen = () => {
+    // Request IRCv3 tags + Twitch-specific commands BEFORE auth/join so that
+    // PRIVMSG lines arrive with @badges=, @emotes=, @display-name=, etc. and
+    // we receive USERSTATE / ROOMSTATE / CLEARCHAT. Without twitch.tv/tags the
+    // live-message path has no badges tag to render, even though history
+    // (from robotty's recent-messages API) ships tags out of the box.
+    ws.send('CAP REQ :twitch.tv/tags twitch.tv/commands');
     // Use real token if authenticated so Twitch sends USERSTATE with emote-sets
     if(S.tokens.twitch && S.twitchUserLogin) {
       ws.send(`PASS oauth:${S.tokens.twitch}`);
