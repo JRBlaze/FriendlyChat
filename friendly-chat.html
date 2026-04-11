@@ -134,6 +134,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .badge.vip{background:rgba(255,200,0,0.2);color:#ffcc00;}
 .twitch-badges{display:inline-flex;align-items:center;gap:3px;margin-right:4px;vertical-align:middle;}
 .twitch-badge-img{width:18px;height:18px;vertical-align:middle;border-radius:2px;image-rendering:auto;}
+.twitch-badge-fallback{display:inline-flex;align-items:center;height:16px;padding:0 5px;border-radius:3px;font-size:9px;font-family:'JetBrains Mono',monospace;letter-spacing:0.04em;font-weight:600;text-transform:uppercase;line-height:1;background:rgba(145,70,255,0.2);color:#c6a5ff;}
 .kick-badges{display:inline-flex;align-items:center;gap:3px;margin-right:4px;vertical-align:middle;flex-wrap:wrap;}
 .kick-badge-label{display:inline-flex;align-items:center;height:16px;padding:0 5px;border-radius:3px;font-size:9px;font-family:'JetBrains Mono',monospace;letter-spacing:0.04em;font-weight:600;text-transform:uppercase;line-height:1;}
 .kick-badge-img{width:16px;height:16px;border-radius:3px;vertical-align:middle;object-fit:cover;}
@@ -1140,6 +1141,18 @@ function connectTwitch(channel) {
         return;
       }
 
+      if(raw.includes(' ROOMSTATE ')) {
+        const tagBlock = raw.match(/^@([^ ]+)/);
+        if(tagBlock) {
+          const rtags = {};
+          tagBlock[1].split(';').forEach(part => {
+            const eq = part.indexOf('=');
+            if(eq !== -1) rtags[part.slice(0, eq)] = part.slice(eq + 1);
+          });
+          if(rtags['room-id']) S.twitchBroadcasterId = rtags['room-id'];
+        }
+      }
+
       if(!raw.includes('PRIVMSG')) return;
 
       // Parse IRCv3 tags once (display name, badges, emotes, message id)
@@ -1621,6 +1634,20 @@ function getTwitchBadgeVersionMap(badgeSetId) {
   return S.twitchBadges.channel[badgeSetId] || S.twitchBadges.global[badgeSetId] || null;
 }
 
+function normalizeTwitchBadgeResponse(data) {
+  const map = {};
+  (data?.badge_sets || data?.data || []).forEach(set => {
+    const setId = set.set_id || set.id;
+    if(!setId) return;
+    const versions = {};
+    (set.versions || []).forEach(v => {
+      if(v.id) versions[v.id] = v;
+    });
+    map[setId] = versions;
+  });
+  return map;
+}
+
 function renderTwitchBadges(badgesTag = '') {
   if(!badgesTag) return '';
   const rendered = [];
@@ -1632,34 +1659,67 @@ function renderTwitchBadges(badgesTag = '') {
     const versionMap = getTwitchBadgeVersionMap(setId);
     const badge = versionMap?.[version] || null;
     const img = badge?.image_url_1x || badge?.image_url_2x || badge?.image_url_4x;
-    if(!img) return;
-    rendered.push(
-      `<img class="twitch-badge-img" src="${img}" alt="${escapeHtml(setId)}" title="${escapeHtml(setId)} ${escapeHtml(version)}">`
-    );
+    if(img) {
+      rendered.push(
+        `<img class="twitch-badge-img" src="${img}" alt="${escapeHtml(setId)}" title="${escapeHtml(setId)} ${escapeHtml(version)}">`
+      );
+      return;
+    }
+    rendered.push(`<span class="twitch-badge-fallback">${escapeHtml(setId)}</span>`);
   });
   return rendered.length ? `<span class="twitch-badges">${rendered.join('')}</span>` : '';
+}
+
+async function fetchTwitchBadgesLegacy() {
+  const [globalRes, channelRes] = await Promise.all([
+    fetch('https://badges.twitch.tv/v1/badges/global/display'),
+    S.twitchBroadcasterId
+      ? fetch(`https://badges.twitch.tv/v1/badges/channels/${S.twitchBroadcasterId}/display`)
+      : Promise.resolve(null),
+  ]);
+
+  if(globalRes?.ok) {
+    const globalData = await globalRes.json();
+    S.twitchBadges.global = normalizeTwitchBadgeResponse(globalData);
+  }
+
+  if(channelRes?.ok) {
+    const channelData = await channelRes.json();
+    S.twitchBadges.channel = normalizeTwitchBadgeResponse(channelData);
+    S.twitchBadges.broadcasterId = S.twitchBroadcasterId;
+  }
 }
 
 async function fetchTwitchBadges() {
   const token = S.tokens.twitch;
   const clientId = TWITCH_CLIENT_ID || extractClientId(CFG.twitch.url);
-  if(!token || !clientId) return;
+  if(!token || !clientId) {
+    try { await fetchTwitchBadgesLegacy(); } catch(e) { console.warn('Twitch fallback badges fetch failed:', e.message); }
+    return;
+  }
 
   const headers = { 'Authorization': `Bearer ${token}`, 'Client-Id': clientId };
+  let loadedGlobal = false;
   try {
     const globalRes = await fetch('https://api.twitch.tv/helix/chat/badges/global', { headers });
     if(globalRes.ok) {
       const data = await globalRes.json();
-      const map = {};
-      (data.data || []).forEach(set => {
-        const versions = {};
-        (set.versions || []).forEach(v => { versions[v.id] = v; });
-        map[set.set_id] = versions;
-      });
-      S.twitchBadges.global = map;
+      S.twitchBadges.global = normalizeTwitchBadgeResponse(data);
+      loadedGlobal = true;
     }
   } catch(e) {
     console.warn('Twitch global badges fetch failed:', e.message);
+  }
+  if(!loadedGlobal) {
+    try {
+      const globalLegacy = await fetch('https://badges.twitch.tv/v1/badges/global/display');
+      if(globalLegacy.ok) {
+        const data = await globalLegacy.json();
+        S.twitchBadges.global = normalizeTwitchBadgeResponse(data);
+      }
+    } catch(e) {
+      console.warn('Twitch fallback global badges fetch failed:', e.message);
+    }
   }
 
   if(!S.twitchBroadcasterId) return;
@@ -1667,18 +1727,24 @@ async function fetchTwitchBadges() {
 
   try {
     const chanRes = await fetch(`https://api.twitch.tv/helix/chat/badges?broadcaster_id=${S.twitchBroadcasterId}`, { headers });
-    if(!chanRes.ok) return;
-    const data = await chanRes.json();
-    const map = {};
-    (data.data || []).forEach(set => {
-      const versions = {};
-      (set.versions || []).forEach(v => { versions[v.id] = v; });
-      map[set.set_id] = versions;
-    });
-    S.twitchBadges.channel = map;
-    S.twitchBadges.broadcasterId = S.twitchBroadcasterId;
+    if(chanRes.ok) {
+      const data = await chanRes.json();
+      S.twitchBadges.channel = normalizeTwitchBadgeResponse(data);
+      S.twitchBadges.broadcasterId = S.twitchBroadcasterId;
+      return;
+    }
   } catch(e) {
     console.warn('Twitch channel badges fetch failed:', e.message);
+  }
+  try {
+    const channelLegacy = await fetch(`https://badges.twitch.tv/v1/badges/channels/${S.twitchBroadcasterId}/display`);
+    if(channelLegacy.ok) {
+      const data = await channelLegacy.json();
+      S.twitchBadges.channel = normalizeTwitchBadgeResponse(data);
+      S.twitchBadges.broadcasterId = S.twitchBroadcasterId;
+    }
+  } catch(e) {
+    console.warn('Twitch fallback channel badges fetch failed:', e.message);
   }
 }
 
@@ -1778,13 +1844,29 @@ function getKickBadgeLabel(type = '') {
   return normalized ? normalized.replace(/[_-]+/g, ' ').toUpperCase() : 'BADGE';
 }
 
+function getKickBadgeImageUrl(badge) {
+  if(!badge || typeof badge !== 'object') return '';
+  const direct = badge.image_url || badge.image || badge.icon || badge.badge_image || badge.badge_url || '';
+  if(direct) return direct;
+  const nested = badge.image?.url
+    || badge.icon?.url
+    || badge.badge?.image_url
+    || badge.badge?.image?.url
+    || badge.asset?.url
+    || badge.urls?.small
+    || badge.urls?.medium
+    || badge.urls?.large
+    || '';
+  return nested || '';
+}
+
 function renderKickBadges(badges = []) {
   if(!Array.isArray(badges) || badges.length === 0) return '';
   const rendered = badges.map(badge => {
     if(!badge || typeof badge !== 'object') return '';
     const type = String(badge.type || '').toLowerCase();
     const label = getKickBadgeLabel(type);
-    const imageUrl = badge.image_url || badge.image || badge.icon || badge.badge_image || badge.badge_url || '';
+    const imageUrl = getKickBadgeImageUrl(badge);
 
     if(imageUrl) {
       return `<img class="kick-badge-img" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(label)}" title="${escapeHtml(label)}">`;
