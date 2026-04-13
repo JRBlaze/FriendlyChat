@@ -391,7 +391,12 @@ const S = {
   twitchBadges: { global: {}, channel: {}, broadcasterId: null },
   // Recent chatters for @mention autocomplete { "platform:name" -> { name, platform } }
   recentChatters: new Map(),
+  // Per-platform moderation capability for the currently joined channel
+  canModerate: { twitch: false, kick: false },
 };
+
+const KICK_EMOTE_CACHE_KEY = 'kick_emotes_cache_v1';
+const KICK_EMOTE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 // ALL_PLATFORMS must be defined before S.filter and S.target are initialized
 const ALL_PLATFORMS = ['twitch','kick'];
@@ -452,6 +457,51 @@ function clearPkceVerifier(platform) {
   const key = `${platform}_verifier`;
   sessionStorage.removeItem(key);
   localStorage.removeItem(key);
+}
+
+function normalizeChannelName(name) {
+  return String(name || '').trim().toLowerCase();
+}
+
+function getKickEmoteCache() {
+  try {
+    return JSON.parse(localStorage.getItem(KICK_EMOTE_CACHE_KEY) || '{}') || {};
+  } catch(_) {
+    return {};
+  }
+}
+
+function saveKickEmoteCache(cache) {
+  try {
+    localStorage.setItem(KICK_EMOTE_CACHE_KEY, JSON.stringify(cache || {}));
+  } catch(_) {}
+}
+
+function loadKickCachedEmotes(channel) {
+  const cache = getKickEmoteCache();
+  const key = normalizeChannelName(channel);
+  const rec = cache[key];
+  if(!rec || !rec.ts || !rec.emotes) return false;
+  if(Date.now() - rec.ts > KICK_EMOTE_CACHE_TTL_MS) {
+    delete cache[key];
+    saveKickEmoteCache(cache);
+    return false;
+  }
+  S.nativeEmotes.kick = { ...rec.emotes, ...S.nativeEmotes.kick };
+  return Object.keys(rec.emotes).length > 0;
+}
+
+function cacheKickEmotes(channel) {
+  const key = normalizeChannelName(channel);
+  if(!key) return;
+  const cache = getKickEmoteCache();
+  cache[key] = { ts: Date.now(), emotes: S.nativeEmotes.kick || {} };
+  saveKickEmoteCache(cache);
+}
+
+function setCanModerate(platform, canModerate) {
+  if(!platform || !(platform in S.canModerate)) return;
+  S.canModerate[platform] = !!canModerate;
 }
 
 function emitOAuthCallback(platform, payload) {
@@ -866,6 +916,7 @@ function denyOAuth() {
 function disconnectPlatform(p) {
   S.auth[p] = false;
   S.tokens[p] = null;
+  setCanModerate(p, false);
   if(p === 'kick') {
     localStorage.removeItem('kick_refresh_token');
     localStorage.removeItem('kick_access_token');
@@ -1053,6 +1104,7 @@ function joinCh(p) {
 
 function leaveCh(p) {
   S.channels[p] = null;
+  setCanModerate(p, false);
   if(S.sockets[p]) { try { S.sockets[p].close(); } catch(e){} S.sockets[p] = null; }
   if(S.intervals[p]) { clearInterval(S.intervals[p]); S.intervals[p] = null; }
   if(p === 'twitch') { S.twitchBroadcasterId = null; S.twitchBroadcasterChannel = null; S.thirdPartyEmotes.twitch = {}; S.nativeEmotes.twitch = {}; S.twitchBadges = { global: {}, channel: {}, broadcasterId: null }; }
@@ -1070,6 +1122,7 @@ function leaveCh(p) {
 // Uses real OAuth token when available (required to receive USERSTATE with emote-sets)
 function connectTwitch(channel) {
   if(S.sockets.twitch) { try{S.sockets.twitch.close();}catch(e){} }
+  setCanModerate('twitch', false);
   const ws = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
   S.sockets.twitch = ws;
 
@@ -1105,6 +1158,11 @@ function connectTwitch(channel) {
             const eq = part.indexOf('=');
             if(eq !== -1) utags[part.slice(0, eq)] = part.slice(eq + 1);
           });
+          const badgeTag = utags['badges'] || '';
+          const canMod = utags['mod'] === '1'
+            || badgeTag.includes('broadcaster/')
+            || badgeTag.includes('moderator/');
+          setCanModerate('twitch', canMod);
           const emoteSets = utags['emote-sets'];
           if(emoteSets && emoteSets !== '0') {
             fetchTwitchEmoteSets(emoteSets.split(','));
@@ -1133,6 +1191,9 @@ function connectTwitch(channel) {
             if(d?.data?.[0]) {
               S.twitchBroadcasterId      = d.data[0].id;
               S.twitchBroadcasterChannel = channel;
+              if(S.twitchUserId && S.twitchUserId === S.twitchBroadcasterId) {
+                setCanModerate('twitch', true);
+              }
             }
             fetchTwitchBadges();
             fetchTwitchNativeEmotes();
@@ -1236,6 +1297,7 @@ const KICK_MAX_RECONNECT_ATTEMPTS  = 10;
 function connectKick(channel, reconnectAttempt = 0) {
   if(S.sockets.kick) { try{S.sockets.kick.close();}catch(e){} }
   if(S.intervals.kick) { clearInterval(S.intervals.kick); S.intervals.kick = null; }
+  setCanModerate('kick', false);
   addSys(`Connecting to Kick: ${channel}...`);
 
   // First fetch the channel info to get the chatroom ID
@@ -1249,8 +1311,20 @@ function connectKick(channel, reconnectAttempt = 0) {
       // without needing another lookup from the server
       S.kickBroadcasterId = data.user_id || null;
       S.kickBroadcasterChannel = channel;
+      const channelName = normalizeChannelName(channel);
+      const meKick = normalizeChannelName(S.kickUserLogin);
+      const canKickMod = meKick && (
+        meKick === channelName
+        || data?.is_moderator === true
+        || data?.chatroom?.is_moderator === true
+        || data?.chatroom?.is_current_user_moderator === true
+      );
+      setCanModerate('kick', canKickMod);
 
       // Fetch Kick native emotes (browser-side, bypasses Cloudflare) + 7TV/BTTV
+      if(loadKickCachedEmotes(channel)) {
+        addSys(`Loaded cached Kick emotes (${Object.keys(S.nativeEmotes.kick).length})`);
+      }
       fetchKickNativeEmotes(channel);
       fetchThirdPartyEmotes('kick', channel, null);
 
@@ -1298,6 +1372,7 @@ function connectKick(channel, reconnectAttempt = 0) {
 
         // Collect native Kick emotes from message payloads as they arrive.
         // Two sources: the emotes array in the payload, and inline [emote:id:name] tokens.
+        let kickEmotesUpdated = false;
         if(payload.emotes?.length) {
           payload.emotes.forEach(e => {
             if(e.id && e.name && !S.nativeEmotes.kick[e.name]) {
@@ -1305,6 +1380,7 @@ function connectKick(channel, reconnectAttempt = 0) {
                 url: `https://files.kick.com/emotes/${e.id}/fullsize`,
                 source: 'Kick'
               };
+              kickEmotesUpdated = true;
             }
           });
         }
@@ -1317,8 +1393,10 @@ function connectKick(channel, reconnectAttempt = 0) {
               url: `https://files.kick.com/emotes/${id}/fullsize`,
               source: 'Kick'
             };
+            kickEmotesUpdated = true;
           }
         }
+        if(kickEmotesUpdated && S.channels.kick === channel) cacheKickEmotes(channel);
 
         // Kick sends emotes as inline [emote:id:name] tokens inside the content string
         if(S.channels.kick === channel) {
@@ -1614,6 +1692,7 @@ async function fetchKickNativeEmotes(channel) {
         });
         if(Object.keys(store).length > 0) {
           S.nativeEmotes.kick = { ...store, ...S.nativeEmotes.kick };
+          cacheKickEmotes(channel);
           addSys(`Loaded ${Object.keys(S.nativeEmotes.kick).length} Kick emotes`);
           return;
         }
@@ -2309,8 +2388,8 @@ function openUserMenu(e, el) {
   actions.push({ label: '↩ Reply', fn: `replyToUser('${escapeHtml(name)}')` });
   actions.push({ label: '👤 User details', fn: `showUserDetails('${platform}','${escapeHtml(name)}','${escapeHtml(userId || '')}')` });
 
-  // Moderation — only if authenticated on that platform
-  if(platform === 'twitch' && S.auth.twitch) {
+  // Moderation — only if authenticated AND the current user has mod/broadcaster rights
+  if(platform === 'twitch' && S.auth.twitch && S.canModerate.twitch) {
     actions.push({ sep: true });
     actions.push({ label: '🗑 Delete last message', fn: `modTwitch('delete','${escapeHtml(name)}')` });
     actions.push({ label: '🧹 Purge (1s)', fn: `modTwitch('timeout','${escapeHtml(name)}',1)`, danger: true });
@@ -2320,7 +2399,7 @@ function openUserMenu(e, el) {
     actions.push({ label: '♻️ Unban/untimeout', fn: `modTwitch('unban','${escapeHtml(name)}')` });
     actions.push({ label: '🔨 Ban', fn: `modTwitch('ban','${escapeHtml(name)}')`, danger: true });
   }
-  if(platform === 'kick' && S.auth.kick) {
+  if(platform === 'kick' && S.auth.kick && S.canModerate.kick) {
     actions.push({ sep: true });
     actions.push({ label: '🗑 Delete last message', fn: `modKick('delete','${escapeHtml(name)}')`, danger: true });
     actions.push({ label: '🧹 Purge (1m)', fn: `modKick('timeout','${escapeHtml(name)}',1)`, danger: true });
@@ -2482,6 +2561,10 @@ function modTwitchCustomTimeout(username) {
 async function modTwitch(action, username, duration) {
   const token    = S.tokens.twitch;
   const clientId = extractClientId(CFG.twitch.url);
+  if(!S.canModerate.twitch) {
+    addSys('Twitch: moderation actions are only available to moderators/broadcaster');
+    return;
+  }
   if(!token || !S.twitchBroadcasterId) {
     addSys('Twitch: join a channel first to moderate');
     return;
@@ -2559,6 +2642,7 @@ function modKickCustomTimeout(username) {
 async function modKick(action, username, duration) {
   const token       = S.tokens.kick;
   const broadcasterId = S.kickBroadcasterId;
+  if(!S.canModerate.kick) { addSys('Kick: moderation actions are only available to moderators/broadcaster'); return; }
   if(!token || !broadcasterId) { addSys('Kick: join a channel first to moderate'); return; }
 
   try {
