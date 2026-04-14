@@ -22,6 +22,16 @@ Friendly Chat lets you watch and participate in Twitch and Kick chats in one pla
 
 Grab the latest installer for your platform from the [Releases](../../releases) page.
 
+### Mac Installation Note
+
+If you see **"Friendly Chat is damaged and can't be opened"** when launching on Mac, this is due to Apple's Gatekeeper blocking unsigned apps. To fix it, open **Terminal** and run:
+
+```
+xattr -cr /Applications/Friendly\ Chat.app
+```
+
+Then try opening the app again. Alternatively go to **System Settings → Privacy & Security** and click **Open Anyway** if the option appears there.
+
 ## Getting started
 
 1. Launch Friendly Chat
