@@ -1301,7 +1301,12 @@ function connectKick(channel, reconnectAttempt = 0) {
   addSys(`Connecting to Kick: ${channel}...`);
 
   // First fetch the channel info to get the chatroom ID
-  fetch(`https://kick.com/api/v1/channels/${channel}`)
+  // Include OAuth token when available so Kick can return current-user mod flags.
+  const kickHeaders = {};
+  if(S.tokens.kick) kickHeaders['Authorization'] = `Bearer ${S.tokens.kick}`;
+  fetch(`https://kick.com/api/v1/channels/${channel}`, {
+    headers: kickHeaders
+  })
     .then(r => { if(!r.ok) throw new Error(r.status); return r.json(); })
     .then(data => {
       const chatroomId = data.chatroom?.id;
