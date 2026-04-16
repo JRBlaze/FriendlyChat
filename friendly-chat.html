@@ -1118,6 +1118,72 @@ function leaveCh(p) {
   refreshTargets();
 }
 
+function parseTwitchIrcTags(rawLine) {
+  const tags = {};
+  const tagMatch = rawLine.match(/^@([^ ]+)/);
+  if(!tagMatch) return tags;
+  tagMatch[1].split(';').forEach(part => {
+    const eq = part.indexOf('=');
+    if(eq !== -1) tags[part.slice(0, eq)] = part.slice(eq + 1);
+  });
+  return tags;
+}
+
+function twitchUserNoticeSummary(tags = {}, fallbackText = '') {
+  const msgId = tags['msg-id'] || 'notice';
+  const name = tags['display-name'] || tags['login'] || tags['msg-param-recipient-display-name'] || 'Someone';
+  const count = tags['msg-param-cumulative-months'] || tags['msg-param-months'] || '';
+  const plan = tags['msg-param-sub-plan-name'] || tags['msg-param-sub-plan'] || '';
+  const tierLabel = tags['msg-param-sub-plan'] === '1000' ? 'Tier 1'
+    : tags['msg-param-sub-plan'] === '2000' ? 'Tier 2'
+      : tags['msg-param-sub-plan'] === '3000' ? 'Tier 3'
+        : '';
+
+  const summaryById = {
+    sub: `${name} subscribed${tierLabel ? ` (${tierLabel})` : ''}.`,
+    resub: `${name} resubscribed${count ? ` (${count} months)` : ''}${tierLabel ? ` (${tierLabel})` : ''}.`,
+    subgift: `${name} gifted a sub to ${(tags['msg-param-recipient-display-name'] || tags['msg-param-recipient-user-name'] || 'a viewer')}.`,
+    anonsubgift: `An anonymous user gifted a sub to ${(tags['msg-param-recipient-display-name'] || tags['msg-param-recipient-user-name'] || 'a viewer')}.`,
+    submysterygift: `${name} gifted ${tags['msg-param-mass-gift-count'] || '?'} subs to the community.`,
+    anonsubmysterygift: `An anonymous user gifted ${tags['msg-param-mass-gift-count'] || '?'} subs to the community.`,
+    giftpaidupgrade: `${name} continued their gifted sub.`,
+    anongiftpaidupgrade: `${name} continued an anonymous gifted sub.`,
+    primepaidupgrade: `${name} upgraded from Prime to a paid sub.`,
+    raid: `${name} is raiding with ${tags['msg-param-viewerCount'] || '?'} viewers.`,
+    ritual: `${name} sent a ritual message.`,
+    bitsbadgetier: `${name} reached Bits badge tier ${tags['msg-param-threshold'] || '?'}.`,
+    announcement: `${name} posted a chat announcement.`,
+    rewardgift: `${name} triggered a reward gift.`,
+    communitypayforward: `${name} paid a sub forward.`,
+    standardpayforward: `${name} paid a sub forward.`,
+  };
+
+  const summary = summaryById[msgId] || `${name} triggered ${msgId.replace(/_/g, ' ')}.`;
+  const extraText = fallbackText ? ` ${fallbackText}` : '';
+  return `${summary}${extraText}`.trim();
+}
+
+function formatKickEventSummary(eventName, payload = {}) {
+  const sender = payload?.sender?.username || payload?.username || payload?.user?.username || 'Someone';
+  const count = payload?.gifter_total || payload?.gift_count || payload?.total || payload?.count || payload?.amount;
+  const recipient = payload?.receiver?.username || payload?.recipient?.username || payload?.target?.username;
+  const map = {
+    'App\\Events\\SubscriptionEvent': `${sender} subscribed.`,
+    'App\\Events\\ResubscriptionEvent': `${sender} resubscribed.`,
+    'App\\Events\\GiftedSubscriptionsEvent': `${sender} gifted ${count || '?'} subs.`,
+    'App\\Events\\SubscriptionGiftedEvent': `${sender} gifted a sub${recipient ? ` to ${recipient}` : ''}.`,
+    'App\\Events\\ChatroomClearEvent': 'Chat was cleared by a moderator.',
+    'App\\Events\\HypeTrainEvent': `Hype Train update${count ? ` (${count})` : ''}.`,
+    'App\\Events\\HypeTrainStartedEvent': `${sender} started a Hype Train!`,
+    'App\\Events\\HypeTrainProgressEvent': `Hype Train progress${count ? `: ${count}` : ''}.`,
+    'App\\Events\\HypeTrainEndedEvent': 'Hype Train ended.',
+    'App\\Events\\BitsEvent': `${sender} cheered${count ? ` ${count} bits` : ''}.`,
+    'App\\Events\\ChannelPointsRedeemedEvent': `${sender} redeemed channel points.`,
+    'App\\Events\\PollUpdateEvent': 'Poll updated.',
+  };
+  return map[eventName] || `${sender} triggered ${eventName.replace(/^App\\\\Events\\\\/, '').replace(/Event$/, '')}.`;
+}
+
 // ---- Twitch IRC over WebSocket ----
 // Uses real OAuth token when available (required to receive USERSTATE with emote-sets)
 function connectTwitch(channel) {
@@ -1151,13 +1217,8 @@ function connectTwitch(channel) {
 
       // USERSTATE is sent after JOIN when using a real token — contains emote-sets
       if(raw.includes('USERSTATE')) {
-        const tagBlock = raw.match(/^@([^ ]+)/);
-        if(tagBlock) {
-          const utags = {};
-          tagBlock[1].split(';').forEach(part => {
-            const eq = part.indexOf('=');
-            if(eq !== -1) utags[part.slice(0, eq)] = part.slice(eq + 1);
-          });
+        const utags = parseTwitchIrcTags(raw);
+        if(Object.keys(utags).length) {
           const badgeTag = utags['badges'] || '';
           const canMod = utags['mod'] === '1'
             || badgeTag.includes('broadcaster/')
@@ -1218,28 +1279,27 @@ function connectTwitch(channel) {
       }
 
       if(raw.includes(' ROOMSTATE ')) {
-        const tagBlock = raw.match(/^@([^ ]+)/);
-        if(tagBlock) {
-          const rtags = {};
-          tagBlock[1].split(';').forEach(part => {
-            const eq = part.indexOf('=');
-            if(eq !== -1) rtags[part.slice(0, eq)] = part.slice(eq + 1);
-          });
-          if(rtags['room-id']) S.twitchBroadcasterId = rtags['room-id'];
+        const rtags = parseTwitchIrcTags(raw);
+        if(rtags['room-id']) S.twitchBroadcasterId = rtags['room-id'];
+      }
+
+      if(raw.includes(' USERNOTICE ')) {
+        const tags = parseTwitchIrcTags(raw);
+        const textMatch = raw.match(/ USERNOTICE #\S+ :(.+)$/);
+        const text = textMatch ? textMatch[1].trim() : '';
+        const notice = twitchUserNoticeSummary(tags, text);
+        if(S.channels.twitch === channel && notice) {
+          addMsg('twitch', 'TWITCH', notice, null, null, null, '', { userId: tags['user-id'] || null });
         }
+        return;
       }
 
       if(!raw.includes('PRIVMSG')) return;
 
       // Parse IRCv3 tags once (display name, badges, emotes, message id)
       let displayName = '', badgeClass = null;
-      const tags = {};
-      const tagMatch = raw.match(/^@([^ ]+)/);
-      if(tagMatch) {
-        tagMatch[1].split(';').forEach(part => {
-          const eq = part.indexOf('=');
-          if(eq !== -1) tags[part.slice(0, eq)] = part.slice(eq + 1);
-        });
+      const tags = parseTwitchIrcTags(raw);
+      if(Object.keys(tags).length) {
         displayName = tags['display-name'] || '';
         const badges = tags['badges'] || '';
         if(badges.includes('broadcaster') || badges.includes('moderator')) badgeClass = 'mod';
@@ -1256,6 +1316,12 @@ function connectTwitch(channel) {
       const msgMatch = raw.match(/PRIVMSG #\S+ :(.+)$/);
       if(!msgMatch) return;
       const text = msgMatch[1].trim();
+      if(tags.bits && Number(tags.bits) > 0 && S.channels.twitch === channel) {
+        addMsg('twitch', 'TWITCH', `${displayName} cheered ${tags.bits} bits!`, null, null, null, '');
+      }
+      if(tags['custom-reward-id'] && S.channels.twitch === channel) {
+        addMsg('twitch', 'TWITCH', `${displayName} redeemed a channel point reward.`, null, null, null, '');
+      }
 
       // Parse emotes tag — format: "id:start-end,start-end/id:start-end"
       // We need the raw tag block again, re-parse it here for emotes
@@ -1366,8 +1432,16 @@ function connectKick(channel, reconnectAttempt = 0) {
           ws.send(JSON.stringify({ event: 'pusher:pong', data: {} }));
           return;
         }
-        if(msg.event !== 'App\\Events\\ChatMessageEvent') return;
-        const payload = JSON.parse(msg.data);
+        const payload = typeof msg.data === 'string'
+          ? (msg.data ? JSON.parse(msg.data) : {})
+          : (msg.data || {});
+        if(msg.event !== 'App\\Events\\ChatMessageEvent') {
+          if(S.channels.kick === channel && msg.event && msg.event !== 'pusher_internal:subscription_succeeded') {
+            const summary = formatKickEventSummary(msg.event, payload || {});
+            if(summary) addMsg('kick', 'KICK', summary, null, null, null, '');
+          }
+          return;
+        }
         const sender = payload.sender?.username || 'unknown';
         const text = payload.content || '';
         const kickBadges = payload.sender?.identity?.badges || [];
