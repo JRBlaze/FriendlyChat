@@ -4,8 +4,7 @@ const { app, BrowserWindow, shell, ipcMain } = require('electron');
 const path = require('path');
 const fs   = require('fs');
 
-// Start server immediately — config.json holds all public credentials,
-// Kick secret is on the cloud proxy (never on this machine).
+// Start server immediately — config.json holds app credentials.
 const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
 require('./server').start(cfg);
 

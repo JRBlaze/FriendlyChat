@@ -1,5 +1,5 @@
 {
   "twitch":  { "client_id": "6a1bqli3xxei93r1zu6msidt5xf4kj" },
-  "proxy_url": "https://friendly-chat-proxy-production.up.railway.app",
+  "kick":    { "client_id": "YOUR_KICK_CLIENT_ID", "client_secret": "YOUR_KICK_CLIENT_SECRET" },
   "port": 8080
 }

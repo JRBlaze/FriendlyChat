@@ -41,6 +41,28 @@ Then try opening the app again. Alternatively go to **System Settings → Privac
 
 You can watch and read chats without signing in. Signing in is only required to send messages.
 
+## Kick OAuth setup (no Railway required)
+
+Friendly Chat now performs Kick token exchange locally, so you do **not** need to deploy a Railway/Render proxy.
+
+1. Create a Kick OAuth application in the Kick developer dashboard.
+2. Set the app redirect URL to:
+   - `http://localhost:8080/friendly-chat.html`
+3. Open `config.json` and add your Kick credentials:
+
+```json
+{
+  "twitch": { "client_id": "YOUR_TWITCH_CLIENT_ID" },
+  "kick": {
+    "client_id": "YOUR_KICK_CLIENT_ID",
+    "client_secret": "YOUR_KICK_CLIENT_SECRET"
+  },
+  "port": 8080
+}
+```
+
+If `kick.client_id` or `kick.client_secret` is missing, Kick sign-in will be disabled until they are provided.
+
 ## Development
 
 ```bash
