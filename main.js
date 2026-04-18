@@ -57,6 +57,7 @@ function createWindow() {
     const isOAuth =
       url.includes('id.twitch.tv/oauth2') ||
       url.includes('accounts.google.com/o/oauth2') ||
+      url.includes('accounts.google.com/o/oauth2/v2/auth') ||
       url.includes('id.kick.com/oauth');
     if(isOAuth) {
       return {

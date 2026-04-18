@@ -27,7 +27,9 @@ function start(CFG) {
   const PORT = CFG.port || 8080;
   const KICK_CLIENT_ID = CFG.kick?.client_id || '';
   const KICK_CLIENT_SECRET = CFG.kick?.client_secret || '';
+  const YOUTUBE_CLIENT_ID = CFG.youtube?.client_id || '';
   const HAS_KICK_OAUTH_CONFIG = !!(KICK_CLIENT_ID && KICK_CLIENT_SECRET);
+  const HAS_YOUTUBE_OAUTH_CONFIG = !!YOUTUBE_CLIENT_ID;
 
   const server = http.createServer(async (req, res) => {
     const pathname = new URL(req.url, `http://localhost:${PORT}`).pathname;
@@ -43,7 +45,9 @@ function start(CFG) {
       res.end(JSON.stringify({
         twitch:  { client_id: CFG.twitch?.client_id  || '' },
         kick:    { client_id: KICK_CLIENT_ID },
+        youtube: { client_id: YOUTUBE_CLIENT_ID },
         has_kick_oauth_config: HAS_KICK_OAUTH_CONFIG,
+        has_youtube_oauth_config: HAS_YOUTUBE_OAUTH_CONFIG,
       }));
       return;
     }
@@ -81,6 +85,87 @@ function start(CFG) {
           access_token:  data.access_token,
           refresh_token: data.refresh_token,
           expires_in:    data.expires_in,
+        }));
+      } catch(e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+      return;
+    }
+
+    // ── /youtube-token — exchanges Google OAuth code for tokens (PKCE) ──────
+    if(pathname === '/youtube-token' && req.method === 'POST') {
+      if(!HAS_YOUTUBE_OAUTH_CONFIG) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'YouTube OAuth not configured in config.json' }));
+        return;
+      }
+      try {
+        const { code, code_verifier, redirect_uri } = await readBody(req);
+        const params = new URLSearchParams({
+          grant_type: 'authorization_code',
+          client_id: YOUTUBE_CLIENT_ID,
+          code: String(code || ''),
+          code_verifier: String(code_verifier || ''),
+          redirect_uri: String(redirect_uri || `http://localhost:${PORT}/friendly-chat.html`)
+        });
+        const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: params.toString(),
+        });
+        const data = await tokenRes.json().catch(() => ({}));
+        if(!tokenRes.ok) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: data.error_description || data.error || 'youtube token exchange failed' }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          access_token: data.access_token,
+          refresh_token: data.refresh_token,
+          expires_in: data.expires_in,
+          scope: data.scope,
+          token_type: data.token_type,
+        }));
+      } catch(e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+      return;
+    }
+
+    // ── /youtube-refresh — refreshes YouTube access token ───────────────────
+    if(pathname === '/youtube-refresh' && req.method === 'POST') {
+      if(!HAS_YOUTUBE_OAUTH_CONFIG) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'YouTube OAuth not configured in config.json' }));
+        return;
+      }
+      try {
+        const { refresh_token } = await readBody(req);
+        const params = new URLSearchParams({
+          grant_type: 'refresh_token',
+          client_id: YOUTUBE_CLIENT_ID,
+          refresh_token: String(refresh_token || ''),
+        });
+        const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: params.toString(),
+        });
+        const data = await tokenRes.json().catch(() => ({}));
+        if(!tokenRes.ok) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: data.error_description || data.error || 'youtube refresh failed' }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          access_token: data.access_token,
+          expires_in: data.expires_in,
+          scope: data.scope,
+          token_type: data.token_type,
         }));
       } catch(e) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
