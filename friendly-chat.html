@@ -539,7 +539,7 @@ function emitOAuthCallback(platform, payload) {
   if(window.opener && !window.opener.closed) {
 
     if(code && platform === 'kick') {
-      // Kick PKCE: exchange the code for a token via the local server,
+      // Kick PKCE: exchange the code for a token via the local proxy server,
       // then post the resulting token back to the parent window
       const verifier = window.opener.sessionStorage?.getItem('kick_verifier')
                     || sessionStorage.getItem('kick_verifier');
@@ -645,7 +645,7 @@ function restoreTwitchSession() {
   .catch(() => markConnected('twitch', token));
 }
 
-// Kick uses PKCE Authorization Code flow via the local server.
+// Kick uses PKCE Authorization Code flow via the local proxy server.
 // OAuth callback flow.
 function startOAuth(p) {
   dbg('oauth', 'Start requested', { platform: p, protocol: window.location.protocol });
@@ -725,7 +725,8 @@ function startOAuth(p) {
 
 // ── Kick PKCE OAuth flow ──────────────────────────────────────────────────────
 // Kick requires Authorization Code + PKCE. The code verifier stays in the
-// browser; the code exchange happens via the local server (server.js).
+// browser; the code exchange happens via the local proxy server (server.js)
+// which holds the client secret securely.
 
 function base64urlEncode(buf) {
   return btoa(String.fromCharCode(...new Uint8Array(buf)))
@@ -745,7 +746,7 @@ async function startKickOAuth() {
   btn.className = 'conn-btn pending';
 
   // Get Kick client ID — already loaded into KICK_CLIENT_ID_PUB from /config
-  // If still empty, try fetching /config once more
+  // If still empty, try fetching directly from the proxy
   let clientId = KICK_CLIENT_ID_PUB;
   if(!clientId) {
     try {
@@ -760,7 +761,7 @@ async function startKickOAuth() {
 
   if(!clientId) {
     resetConnectBtn('kick');
-    showToast('Kick OAuth is not configured. Add kick.client_id and kick.client_secret to config.json.');
+    showToast('Kick: proxy not reachable — check your internet connection');
     return;
   }
 
