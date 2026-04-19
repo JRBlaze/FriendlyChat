@@ -50,6 +50,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .plat-info{flex:1;}
 .plat-info strong{font-size:14px;font-weight:500;display:block;}
 .plat-info small{font-size:12px;color:var(--text-muted);}
+.plat-help{display:block;font-size:11px;color:var(--text-dim);margin-top:3px;}
+.plat-help a{color:var(--accent);text-decoration:underline;text-underline-offset:2px;}
+.plat-help a:hover{opacity:0.9;}
 .status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
 .status-dot.on{background:#53fc18;}
 .status-dot.off{background:var(--text-dim);}
@@ -250,13 +253,21 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
       </div>
       <div class="oauth-row" id="row-kick">
         <div class="plat-icon kick">KI</div>
-        <div class="plat-info"><strong>Kick</strong><small id="st-kick">Not connected</small></div>
+        <div class="plat-info">
+          <strong>Kick</strong>
+          <small id="st-kick">Not connected</small>
+          <span class="plat-help"><a href="https://docs.kick.com/getting-started/generate-client-id-and-secret" target="_blank" rel="noopener noreferrer">Get Kick Client ID + Secret</a></span>
+        </div>
         <div class="status-dot off" id="sd-kick"></div>
         <button class="conn-btn kick-c" id="btn-kick" onclick="startOAuth('kick')">Connect</button>
       </div>
       <div class="oauth-row" id="row-youtube">
         <div class="plat-icon youtube">YT</div>
-        <div class="plat-info"><strong>YouTube</strong><small id="st-youtube">Not connected</small></div>
+        <div class="plat-info">
+          <strong>YouTube</strong>
+          <small id="st-youtube">Not connected</small>
+          <span class="plat-help"><a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer">Create Google OAuth Client ID</a></span>
+        </div>
         <div class="status-dot off" id="sd-youtube"></div>
         <button class="conn-btn youtube-c" id="btn-youtube" onclick="startOAuth('youtube')">Connect</button>
       </div>
@@ -355,6 +366,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 let TWITCH_CLIENT_ID  = '';
 let KICK_CLIENT_ID_PUB = '';
 let YOUTUBE_CLIENT_ID_PUB = '';
+let HAS_KICK_OAUTH_CONFIG = false;
+let HAS_YOUTUBE_OAUTH_CONFIG = false;
 
 async function loadConfig(retries = 5, delayMs = 800) {
   dbg('config', 'Loading /config', { retries, delayMs });
@@ -366,10 +379,14 @@ async function loadConfig(retries = 5, delayMs = 800) {
       TWITCH_CLIENT_ID   = c.twitch?.client_id  || '';
       KICK_CLIENT_ID_PUB = c.kick?.client_id    || '';
       YOUTUBE_CLIENT_ID_PUB = c.youtube?.client_id || '';
+      HAS_KICK_OAUTH_CONFIG = !!c.has_kick_oauth_config;
+      HAS_YOUTUBE_OAUTH_CONFIG = !!c.has_youtube_oauth_config;
       dbg('config', 'Loaded /config successfully', {
         hasKickClientId: !!KICK_CLIENT_ID_PUB,
+        hasKickOAuthConfig: HAS_KICK_OAUTH_CONFIG,
         hasTwitchClientId: !!TWITCH_CLIENT_ID,
-        hasYoutubeClientId: !!YOUTUBE_CLIENT_ID_PUB
+        hasYoutubeClientId: !!YOUTUBE_CLIENT_ID_PUB,
+        hasYoutubeOAuthConfig: HAS_YOUTUBE_OAUTH_CONFIG
       });
       CFG.twitch.url = `https://id.twitch.tv/oauth2/authorize?client_id=${TWITCH_CLIENT_ID}&scope=chat%3Aread+chat%3Aedit+user%3Awrite%3Achat+moderator%3Amanage%3Abanned_users+moderator%3Amanage%3Achat_messages+moderator%3Aread%3Afollowers+user%3Aread%3Aemotes&response_type=token`;
       return;
@@ -892,6 +909,7 @@ async function promptForRuntimeOAuthConfig(platform) {
         return false;
       }
       YOUTUBE_CLIENT_ID_PUB = clientId;
+      HAS_YOUTUBE_OAUTH_CONFIG = true;
       showToast('YouTube OAuth client configured for this app session');
       return true;
     } catch(e) {
@@ -923,6 +941,7 @@ async function promptForRuntimeOAuthConfig(platform) {
         return false;
       }
       KICK_CLIENT_ID_PUB = clientId;
+      HAS_KICK_OAUTH_CONFIG = true;
       showToast('Kick OAuth client configured for this app session');
       return true;
     } catch(e) {
@@ -940,17 +959,18 @@ async function startYoutubeOAuth() {
   btn.className = 'conn-btn pending';
 
   let clientId = YOUTUBE_CLIENT_ID_PUB;
-  if(!clientId) {
+  if(!clientId || !HAS_YOUTUBE_OAUTH_CONFIG) {
     try {
       const r = await fetch('/config');
       if(r.ok) {
         const d = await r.json();
         clientId = d.youtube?.client_id || '';
+        HAS_YOUTUBE_OAUTH_CONFIG = !!d.has_youtube_oauth_config;
         if(clientId) YOUTUBE_CLIENT_ID_PUB = clientId;
       }
     } catch(_) {}
   }
-  if(!clientId) {
+  if(!clientId || !HAS_YOUTUBE_OAUTH_CONFIG) {
     const configured = await promptForRuntimeOAuthConfig('youtube');
     if(!configured) {
       resetConnectBtn('youtube');
@@ -1038,18 +1058,19 @@ async function startKickOAuth() {
   // Get Kick client ID — already loaded into KICK_CLIENT_ID_PUB from /config
   // If still empty, try fetching /config once more
   let clientId = KICK_CLIENT_ID_PUB;
-  if(!clientId) {
+  if(!clientId || !HAS_KICK_OAUTH_CONFIG) {
     try {
       const r = await fetch('/config');
       if(r.ok) {
         const d = await r.json();
         clientId = d.kick?.client_id || '';
+        HAS_KICK_OAUTH_CONFIG = !!d.has_kick_oauth_config;
         if(clientId) KICK_CLIENT_ID_PUB = clientId;
       }
     } catch(e) {}
   }
 
-  if(!clientId) {
+  if(!clientId || !HAS_KICK_OAUTH_CONFIG) {
     const configured = await promptForRuntimeOAuthConfig('kick');
     if(!configured) {
       resetConnectBtn('kick');
