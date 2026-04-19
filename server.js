@@ -25,20 +25,11 @@ function readBody(req) {
 
 function start(CFG) {
   const PORT = CFG.port || 8080;
-  let KICK_CLIENT_ID = '';
-  let KICK_CLIENT_SECRET = '';
-  let YOUTUBE_CLIENT_ID = '';
-  let HAS_KICK_OAUTH_CONFIG = false;
-  let HAS_YOUTUBE_OAUTH_CONFIG = false;
-
-  const applyOAuthConfigFromCfg = () => {
-    KICK_CLIENT_ID = CFG.kick?.client_id || '';
-    KICK_CLIENT_SECRET = CFG.kick?.client_secret || '';
-    YOUTUBE_CLIENT_ID = CFG.youtube?.client_id || '';
-    HAS_KICK_OAUTH_CONFIG = !!(KICK_CLIENT_ID && KICK_CLIENT_SECRET);
-    HAS_YOUTUBE_OAUTH_CONFIG = !!YOUTUBE_CLIENT_ID;
-  };
-  applyOAuthConfigFromCfg();
+  const KICK_CLIENT_ID = CFG.kick?.client_id || '';
+  const KICK_CLIENT_SECRET = CFG.kick?.client_secret || '';
+  const YOUTUBE_CLIENT_ID = CFG.youtube?.client_id || '';
+  const HAS_KICK_OAUTH_CONFIG = !!(KICK_CLIENT_ID && KICK_CLIENT_SECRET);
+  const HAS_YOUTUBE_OAUTH_CONFIG = !!YOUTUBE_CLIENT_ID;
 
   const server = http.createServer(async (req, res) => {
     const pathname = new URL(req.url, `http://localhost:${PORT}`).pathname;
@@ -58,49 +49,6 @@ function start(CFG) {
         has_kick_oauth_config: HAS_KICK_OAUTH_CONFIG,
         has_youtube_oauth_config: HAS_YOUTUBE_OAUTH_CONFIG,
       }));
-      return;
-    }
-
-    // ── /oauth-config — runtime BYO OAuth client setup (local only) ─────────
-    if(pathname === '/oauth-config' && req.method === 'POST') {
-      try {
-        const body = await readBody(req);
-        const platform = String(body.platform || '').toLowerCase();
-        const clientId = String(body.client_id || '').trim();
-        const clientSecret = String(body.client_secret || '').trim();
-
-        if(platform === 'youtube') {
-          if(!clientId) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'youtube client_id is required' }));
-            return;
-          }
-          CFG.youtube = { ...(CFG.youtube || {}), client_id: clientId };
-          applyOAuthConfigFromCfg();
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: true, has_youtube_oauth_config: HAS_YOUTUBE_OAUTH_CONFIG }));
-          return;
-        }
-
-        if(platform === 'kick') {
-          if(!clientId || !clientSecret) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'kick client_id and client_secret are required' }));
-            return;
-          }
-          CFG.kick = { ...(CFG.kick || {}), client_id: clientId, client_secret: clientSecret };
-          applyOAuthConfigFromCfg();
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: true, has_kick_oauth_config: HAS_KICK_OAUTH_CONFIG }));
-          return;
-        }
-
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Unsupported platform. Use \"kick\" or \"youtube\".' }));
-      } catch(e) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: e.message }));
-      }
       return;
     }
 
