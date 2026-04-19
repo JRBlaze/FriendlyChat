@@ -23,9 +23,6 @@
   --kick: #53fc18;
   --kick-dim: rgba(83,252,24,0.12);
   --kick-border: rgba(83,252,24,0.3);
-  --youtube: #ff3b30;
-  --youtube-dim: rgba(255,59,48,0.12);
-  --youtube-border: rgba(255,59,48,0.3);
   --accent: #7c6bff;
 }
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -42,11 +39,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .oauth-row{display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:12px;border:1px solid var(--border);background:var(--surface2);transition:border-color 0.2s,background 0.2s;}
 .oauth-row.conn-twitch{border-color:var(--twitch-border);background:var(--twitch-dim);}
 .oauth-row.conn-kick{border-color:var(--kick-border);background:var(--kick-dim);}
-.oauth-row.conn-youtube{border-color:var(--youtube-border);background:var(--youtube-dim);}
 .plat-icon{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace;}
 .plat-icon.twitch{background:var(--twitch);color:#fff;}
 .plat-icon.kick{background:var(--kick);color:#0a0a0a;}
-.plat-icon.youtube{background:var(--youtube);color:#fff;}
 .plat-info{flex:1;}
 .plat-info strong{font-size:14px;font-weight:500;display:block;}
 .plat-info small{font-size:12px;color:var(--text-muted);}
@@ -56,7 +51,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .conn-btn{padding:7px 16px;border-radius:8px;font-size:12px;font-weight:500;font-family:'DM Sans',sans-serif;cursor:pointer;border:1px solid transparent;transition:all 0.15s;white-space:nowrap;}
 .conn-btn.twitch-c{background:var(--twitch);color:#fff;border-color:var(--twitch);}
 .conn-btn.kick-c{background:var(--kick);color:#0a0a0a;border-color:var(--kick);}
-.conn-btn.youtube-c{background:var(--youtube);color:#fff;border-color:var(--youtube);}
 .conn-btn.discon{background:transparent;border-color:var(--border2);color:var(--text-muted);}
 .conn-btn.discon:hover{border-color:#ff5555;color:#ff5555;}
 .conn-btn.pending{opacity:0.6;cursor:wait;}
@@ -76,11 +70,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .ch-wrap:focus-within{border-color:var(--border2);}
 .ch-wrap.act-twitch{border-color:var(--twitch-border);}
 .ch-wrap.act-kick{border-color:var(--kick-border);}
-.ch-wrap.act-youtube{border-color:var(--youtube-border);}
 .plat-tag{padding:0 9px;height:34px;display:flex;align-items:center;font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace;letter-spacing:0.05em;border-right:1px solid var(--border);white-space:nowrap;flex-shrink:0;}
 .plat-tag.twitch{color:var(--twitch);background:var(--twitch-dim);}
 .plat-tag.kick{color:var(--kick);background:var(--kick-dim);}
-.plat-tag.youtube{color:var(--youtube);background:var(--youtube-dim);}
 .ch-wrap input{flex:1;background:transparent;border:none;outline:none;padding:0 9px;font-size:12px;font-family:'JetBrains Mono',monospace;color:var(--text);height:34px;min-width:0;}
 .ch-wrap input::placeholder{color:var(--text-dim);}
 .join-btn{padding:0 12px;height:34px;border-radius:0;border:none;border-left:1px solid var(--border);background:transparent;color:var(--text-muted);font-size:11px;font-weight:500;font-family:'DM Sans',sans-serif;cursor:pointer;transition:all 0.15s;white-space:nowrap;flex-shrink:0;}
@@ -92,7 +84,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .acc-dot{width:6px;height:6px;border-radius:50%;background:var(--text-dim);transition:background 0.3s;}
 .acc-dot.on-twitch{background:var(--twitch);}
 .acc-dot.on-kick{background:var(--kick);}
-.acc-dot.on-youtube{background:var(--youtube);}
 
 .app-body{flex:1;display:flex;overflow:hidden;min-height:0;}
 .chat-col{flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;}
@@ -114,8 +105,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .chip.twitch.on{opacity:1;}
 .chip.kick{border-color:var(--kick-border);color:var(--kick);background:var(--kick-dim);opacity:0.4;}
 .chip.kick.on{opacity:1;}
-.chip.youtube{border-color:var(--youtube-border);color:var(--youtube);background:var(--youtube-dim);opacity:0.4;}
-.chip.youtube.on{opacity:1;}
 .f-spacer{flex:1;}
 .msg-ct{font-size:calc(var(--chat-font-size) - 2px);font-family:'JetBrains Mono',monospace;color:var(--text-dim);}
 .feed{flex:1;overflow-y:auto;padding:6px 0;min-height:0;}
@@ -128,12 +117,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .m-dot{width:3px;height:3px;border-radius:50%;flex-shrink:0;margin-top:7px;}
 .m-dot.twitch{background:var(--twitch);}
 .m-dot.kick{background:var(--kick);}
-.m-dot.youtube{background:var(--youtube);}
 .m-time{font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text-muted);flex-shrink:0;min-width:38px;}
 .m-author{font-size:var(--chat-font-size);font-weight:500;flex-shrink:0;}
 .m-author.twitch{color:var(--twitch);}
 .m-author.kick{color:var(--kick);}
-.m-author.youtube{color:var(--youtube);}
 .m-colon{color:var(--text-dim);margin-right:3px;font-size:var(--chat-font-size);}
 .m-body{font-size:var(--chat-font-size);color:var(--text);line-height:1.4;word-break:break-word;}
 .chat-link{color:#7c9fff;text-decoration:underline;text-underline-offset:2px;word-break:break-all;}
@@ -170,8 +157,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .t-chip.twitch-t.sel{opacity:1;background:var(--twitch-dim);}
 .t-chip.kick-t{border-color:var(--kick-border);color:var(--kick);opacity:0.3;}
 .t-chip.kick-t.sel{opacity:1;background:var(--kick-dim);}
-.t-chip.youtube-t{border-color:var(--youtube-border);color:var(--youtube);opacity:0.3;}
-.t-chip.youtube-t.sel{opacity:1;background:var(--youtube-dim);}
 .t-chip.locked{opacity:0.15!important;cursor:not-allowed;}
 .send-row{display:flex;gap:8px;align-items:center;}
 .send-input{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:13px;font-family:'DM Sans',sans-serif;color:var(--text);outline:none;transition:border-color 0.2s;}
@@ -254,12 +239,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
         <div class="status-dot off" id="sd-kick"></div>
         <button class="conn-btn kick-c" id="btn-kick" onclick="startOAuth('kick')">Connect</button>
       </div>
-      <div class="oauth-row" id="row-youtube">
-        <div class="plat-icon youtube">YT</div>
-        <div class="plat-info"><strong>YouTube</strong><small id="st-youtube">Not connected</small></div>
-        <div class="status-dot off" id="sd-youtube"></div>
-        <button class="conn-btn youtube-c" id="btn-youtube" onclick="startOAuth('youtube')">Connect</button>
-      </div>
     </div>
     <div class="oauth-footer">
       <button class="skip-btn" onclick="dismiss()">Skip for now (read-only)</button>
@@ -282,17 +261,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
         <input type="text" id="ci-kick" placeholder="channel name" />
         <button class="join-btn" id="jb-kick" onclick="joinCh('kick')">Join</button>
       </div>
-      <div class="ch-wrap" id="cw-youtube">
-        <span class="plat-tag youtube">YOUTUBE</span>
-        <input type="text" id="ci-youtube" placeholder="live video URL or ID" />
-        <button class="join-btn" id="jb-youtube" onclick="joinCh('youtube')">Join</button>
-      </div>
     </div>
     <button class="acc-btn" onclick="openOAuth()">
       <div class="acc-dots">
         <div class="acc-dot" id="ad-twitch"></div>
         <div class="acc-dot" id="ad-kick"></div>
-        <div class="acc-dot" id="ad-youtube"></div>
       </div>
       <span>Accounts</span>
     </button>
@@ -307,7 +280,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
         <span class="chip all on" id="fc-all" onclick="toggleFilterAll()">ALL</span>
         <span class="chip twitch" id="fc-twitch" onclick="toggleFilter('twitch')">TWITCH</span>
         <span class="chip kick" id="fc-kick" onclick="toggleFilter('kick')">KICK</span>
-        <span class="chip youtube" id="fc-youtube" onclick="toggleFilter('youtube')">YOUTUBE</span>
         <div class="font-size-ctrl">
           <button class="fs-btn" onclick="adjustFontSize(-1)" title="Decrease font size">A−</button>
           <input type="number" id="fs-input" class="fs-input" value="13" min="9" max="22" title="Font size in px" onchange="setFontSizeFromInput()" onkeydown="if(event.key==='Enter') setFontSizeFromInput()">
@@ -329,7 +301,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
           <span class="t-chip all-t sel" id="tc-all" onclick="toggleTargetAll()">ALL</span>
           <span class="t-chip twitch-t" id="tc-twitch" onclick="toggleTarget('twitch')">TWITCH</span>
           <span class="t-chip kick-t" id="tc-kick" onclick="toggleTarget('kick')">KICK</span>
-          <span class="t-chip youtube-t" id="tc-youtube" onclick="toggleTarget('youtube')">YOUTUBE</span>
         </div>
         <div class="send-row">
           <button class="emote-btn" id="emote-btn" onclick="toggleEmotePicker()" title="Browse emotes">😊</button>
@@ -354,7 +325,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 // Nothing sensitive is hardcoded here.
 let TWITCH_CLIENT_ID  = '';
 let KICK_CLIENT_ID_PUB = '';
-let YOUTUBE_CLIENT_ID_PUB = '';
 
 async function loadConfig(retries = 5, delayMs = 800) {
   dbg('config', 'Loading /config', { retries, delayMs });
@@ -365,11 +335,9 @@ async function loadConfig(retries = 5, delayMs = 800) {
       const c = await r.json();
       TWITCH_CLIENT_ID   = c.twitch?.client_id  || '';
       KICK_CLIENT_ID_PUB = c.kick?.client_id    || '';
-      YOUTUBE_CLIENT_ID_PUB = c.youtube?.client_id || '';
       dbg('config', 'Loaded /config successfully', {
         hasKickClientId: !!KICK_CLIENT_ID_PUB,
-        hasTwitchClientId: !!TWITCH_CLIENT_ID,
-        hasYoutubeClientId: !!YOUTUBE_CLIENT_ID_PUB
+        hasTwitchClientId: !!TWITCH_CLIENT_ID
       });
       CFG.twitch.url = `https://id.twitch.tv/oauth2/authorize?client_id=${TWITCH_CLIENT_ID}&scope=chat%3Aread+chat%3Aedit+user%3Awrite%3Achat+moderator%3Amanage%3Abanned_users+moderator%3Amanage%3Achat_messages+moderator%3Aread%3Afollowers+user%3Aread%3Aemotes&response_type=token`;
       return;
@@ -397,52 +365,41 @@ const CFG = {
     scopes:['Read your chat messages','Send chat messages','Access your channel information'],
     authBtnBg:'#53fc18', authBtnColor:'#0a0a0a', authBtnLabel:'Authorize with Kick',
     url: null
-  },
-  youtube: {
-    name:'YouTube', logoText:'YT', logoBg:'#ff3b30', logoColor:'#fff',
-    scopes:['Read live chat messages','Send live chat messages'],
-    authBtnBg:'#ff3b30', authBtnColor:'#fff', authBtnLabel:'Authorize with Google',
-    url: null
   }
 };
 
 const S = {
-  auth:{twitch:false,kick:false,youtube:false},
-  tokens:{twitch:null,kick:null,youtube:null},
-  channels:{twitch:null,kick:null,youtube:null},
+  auth:{twitch:false,kick:false},
+  tokens:{twitch:null,kick:null},
+  channels:{twitch:null,kick:null},
   filter: null, target: null, msgCount:0,
   currentPlatform:null,
-  sockets:{twitch:null,kick:null,youtube:null},
-  intervals:{twitch:null,kick:null,youtube:null,youtubeAuth:null},
+  sockets:{twitch:null,kick:null},
+  intervals:{twitch:null,kick:null},
   // Twitch send helpers — cached to avoid re-fetching on every message
   twitchUserId:null, twitchUserLogin:null,
   twitchBroadcasterId:null, twitchBroadcasterChannel:null,
   // Kick broadcaster ID cache
   kickBroadcasterId:null, kickBroadcasterChannel:null,
   kickUserLogin:null,
-  youtubeUserName:null,
-  youtubeLiveChatId:null,
-  youtubeVideoId:null,
-  youtubeNextPageToken:'',
-  youtubeSeenMessageIds:new Set(),
   // Third-party emote maps: { emoteName -> { url, source } }
   // Keyed per platform so Twitch and Kick have separate sets
-  thirdPartyEmotes: { twitch: {}, kick: {}, youtube: {} },
+  thirdPartyEmotes: { twitch: {}, kick: {} },
   // Native emotes fetched from platform APIs: { emoteName -> { url, source } }
-  nativeEmotes: { twitch: {}, kick: {}, youtube: {} },
+  nativeEmotes: { twitch: {}, kick: {} },
   // Twitch badge set cache { global: {setId -> versions}, channel: {setId -> versions} }
   twitchBadges: { global: {}, channel: {}, broadcasterId: null },
   // Recent chatters for @mention autocomplete { "platform:name" -> { name, platform } }
   recentChatters: new Map(),
   // Per-platform moderation capability for the currently joined channel
-  canModerate: { twitch: false, kick: false, youtube: false },
+  canModerate: { twitch: false, kick: false },
 };
 
 const KICK_EMOTE_CACHE_KEY = 'kick_emotes_cache_v1';
 const KICK_EMOTE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 // ALL_PLATFORMS must be defined before S.filter and S.target are initialized
-const ALL_PLATFORMS = ['twitch','kick','youtube'];
+const ALL_PLATFORMS = ['twitch','kick'];
 S.filter = new Set(ALL_PLATFORMS);
 S.target = new Set(ALL_PLATFORMS);
 
@@ -614,36 +571,6 @@ function emitOAuthCallback(platform, payload) {
       return;
     }
 
-    if(code && platform === 'youtube') {
-      const verifier = getPkceVerifier('youtube', window.opener);
-      const redirectUri = getRedirectUri();
-      fetch('/youtube-token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, code_verifier: verifier, redirect_uri: redirectUri }),
-      })
-      .then(r => r.json())
-      .then(d => {
-        window.opener.postMessage({
-          type: 'oauth_callback',
-          platform: 'youtube',
-          token: d.access_token || null,
-          refresh_token: d.refresh_token || null,
-          expires_in: d.expires_in || null,
-          error: d.error || null,
-        }, window.location.origin);
-        window.close();
-      })
-      .catch(e => {
-        window.opener.postMessage({
-          type: 'oauth_callback', platform: 'youtube',
-          token: null, error: e.message
-        }, window.location.origin);
-        window.close();
-      });
-      return;
-    }
-
     // Twitch implicit flow — token is in the hash directly
     window.opener.postMessage({
       type: 'oauth_callback', platform,
@@ -655,28 +582,6 @@ function emitOAuthCallback(platform, payload) {
   }
 
   // Fallback: main tab full-page redirect
-
-  if(code && platform === 'youtube') {
-    const verifier = getPkceVerifier('youtube');
-    fetch('/youtube-token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, code_verifier: verifier, redirect_uri: getRedirectUri() }),
-    })
-    .then(r => r.json())
-    .then(d => {
-      if(d.access_token) {
-        localStorage.setItem('youtube_access_token', d.access_token);
-        if(d.refresh_token) localStorage.setItem('youtube_refresh_token', d.refresh_token);
-        localStorage.setItem('youtube_token_expiry', Date.now() + ((d.expires_in || 3600) * 1000));
-        clearPkceVerifier('youtube');
-        history.replaceState(null, '', window.location.pathname);
-        markConnected('youtube', d.access_token);
-      }
-    })
-    .catch(() => {});
-    return;
-  }
 
   if(token) {
     history.replaceState(null, '', window.location.pathname);
@@ -695,7 +600,6 @@ function emitOAuthCallback(platform, payload) {
 loadConfig().then(() => {
   restoreTwitchSession();
   restoreKickSession();
-  restoreYoutubeSession();
 });
 
 function restoreKickSession() {
@@ -741,59 +645,6 @@ function restoreTwitchSession() {
   .catch(() => markConnected('twitch', token));
 }
 
-function restoreYoutubeSession() {
-  const refreshToken = localStorage.getItem('youtube_refresh_token');
-  const accessToken  = localStorage.getItem('youtube_access_token');
-  const expiry       = parseInt(localStorage.getItem('youtube_token_expiry') || '0', 10);
-  if(!refreshToken) return;
-  if(accessToken && expiry > Date.now() + 300000) {
-    markConnected('youtube', accessToken);
-    return;
-  }
-  fetch('/youtube-refresh', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refresh_token: refreshToken }),
-  })
-  .then(r => r.json())
-  .then(d => {
-    if(d.access_token) {
-      localStorage.setItem('youtube_access_token', d.access_token);
-      localStorage.setItem('youtube_token_expiry', Date.now() + ((d.expires_in || 3600) * 1000));
-      markConnected('youtube', d.access_token);
-    } else {
-      localStorage.removeItem('youtube_refresh_token');
-      localStorage.removeItem('youtube_access_token');
-      localStorage.removeItem('youtube_token_expiry');
-    }
-  })
-  .catch(() => {});
-}
-
-function scheduleYoutubeTokenRefresh() {
-  if(S.intervals.youtubeAuth) { clearTimeout(S.intervals.youtubeAuth); S.intervals.youtubeAuth = null; }
-  const refreshToken = localStorage.getItem('youtube_refresh_token');
-  const expiry = parseInt(localStorage.getItem('youtube_token_expiry') || '0', 10);
-  if(!refreshToken || !expiry) return;
-  const delay = Math.max(5000, expiry - Date.now() - (5 * 60 * 1000));
-  S.intervals.youtubeAuth = setTimeout(async () => {
-    try {
-      const r = await fetch('/youtube-refresh', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: refreshToken }),
-      });
-      const d = await r.json();
-      if(d.access_token) {
-        localStorage.setItem('youtube_access_token', d.access_token);
-        localStorage.setItem('youtube_token_expiry', Date.now() + ((d.expires_in || 3600) * 1000));
-        S.tokens.youtube = d.access_token;
-      }
-    } catch(_) {}
-    scheduleYoutubeTokenRefresh();
-  }, delay);
-}
-
 // Kick uses PKCE Authorization Code flow via the local server.
 // OAuth callback flow.
 function startOAuth(p) {
@@ -803,7 +654,6 @@ function startOAuth(p) {
     return;
   }
   if(p === 'kick') { startKickOAuth(); return; }
-  if(p === 'youtube') { startYoutubeOAuth(); return; }
 
   S.currentPlatform = p;
   const c = CFG[p];
@@ -868,83 +718,6 @@ function startOAuth(p) {
       if(!S.tokens[p]) {
         resetConnectBtn(p);
         showToast('Authorization cancelled');
-      }
-    }
-  }, 400);
-}
-
-async function startYoutubeOAuth() {
-  const btn = document.getElementById('btn-youtube');
-  btn.textContent = 'Connecting...';
-  btn.className = 'conn-btn pending';
-
-  let clientId = YOUTUBE_CLIENT_ID_PUB;
-  if(!clientId) {
-    try {
-      const r = await fetch('/config');
-      if(r.ok) {
-        const d = await r.json();
-        clientId = d.youtube?.client_id || '';
-        if(clientId) YOUTUBE_CLIENT_ID_PUB = clientId;
-      }
-    } catch(_) {}
-  }
-  if(!clientId) {
-    resetConnectBtn('youtube');
-    showToast('YouTube OAuth is not configured. Add youtube.client_id to config.json.');
-    return;
-  }
-
-  const { verifier, challenge } = await generatePKCE();
-  setPkceVerifier('youtube', verifier);
-  const redirectUri = encodeURIComponent(getRedirectUri());
-  const state = 'youtube';
-  const oauthUrl = `https://accounts.google.com/o/oauth2/v2/auth`
-    + `?client_id=${encodeURIComponent(clientId)}`
-    + `&redirect_uri=${redirectUri}`
-    + `&response_type=code`
-    + `&scope=${encodeURIComponent('https://www.googleapis.com/auth/youtube.force-ssl')}`
-    + `&access_type=offline`
-    + `&prompt=consent`
-    + `&code_challenge=${challenge}`
-    + `&code_challenge_method=S256`
-    + `&state=${state}`;
-
-  const width = 500, height = 700;
-  const left = Math.round(window.screenX + (window.outerWidth - width) / 2);
-  const top = Math.round(window.screenY + (window.outerHeight - height) / 2);
-  const popup = window.open(oauthUrl, 'youtube_oauth', `width=${width},height=${height},left=${left},top=${top},toolbar=no,menubar=no`);
-  if(!popup) {
-    showToast('Popup blocked — redirecting in current tab...');
-    setTimeout(() => { window.location.href = oauthUrl; }, 1000);
-    return;
-  }
-
-  function onMessage(e) {
-    if(e.origin !== window.location.origin) return;
-    if(!e.data || e.data.type !== 'oauth_callback' || e.data.platform !== 'youtube') return;
-    window.removeEventListener('message', onMessage);
-    clearInterval(closedPoll);
-    if(e.data.token) {
-      if(e.data.refresh_token) localStorage.setItem('youtube_refresh_token', e.data.refresh_token);
-      localStorage.setItem('youtube_access_token', e.data.token);
-      localStorage.setItem('youtube_token_expiry', Date.now() + ((e.data.expires_in || 3600) * 1000));
-      clearPkceVerifier('youtube');
-      markConnected('youtube', e.data.token);
-    } else {
-      resetConnectBtn('youtube');
-      showToast(`YouTube auth failed: ${(e.data.error || 'unknown').replace(/\+/g, ' ')}`);
-    }
-  }
-  window.addEventListener('message', onMessage);
-
-  const closedPoll = setInterval(() => {
-    if(popup.closed) {
-      clearInterval(closedPoll);
-      window.removeEventListener('message', onMessage);
-      if(!S.tokens.youtube) {
-        resetConnectBtn('youtube');
-        showToast('YouTube authorization cancelled');
       }
     }
   }, 400);
@@ -1077,9 +850,6 @@ function markConnected(p, token) {
     })
     .catch(() => {});
   }
-  if(p === 'youtube') {
-    scheduleYoutubeTokenRefresh();
-  }
   const btn = document.getElementById(`btn-${p}`);
   btn.textContent = 'Disconnect';
   btn.className = 'conn-btn discon';
@@ -1127,19 +897,6 @@ function fetchDisplayName(p, token) {
       if(name) { statusEl.textContent = `Connected as ${name}`; S.kickUserLogin = name; }
     })
     .catch(() => {});
-  } else if(p === 'youtube') {
-    fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-    .then(r => r.ok ? r.json() : null)
-    .then(d => {
-      const name = d?.items?.[0]?.snippet?.title;
-      if(name) {
-        statusEl.textContent = `Connected as ${name}`;
-        S.youtubeUserName = name;
-      }
-    })
-    .catch(() => {});
   }
 }
 
@@ -1166,14 +923,6 @@ function disconnectPlatform(p) {
   }
   if(p === 'twitch')  { localStorage.removeItem('twitch_access_token');  S.twitchUserLogin  = null; S.twitchUserId = null; }
   if(p === 'kick')    { S.kickUserLogin = null; }
-  if(p === 'youtube') {
-    localStorage.removeItem('youtube_refresh_token');
-    localStorage.removeItem('youtube_access_token');
-    localStorage.removeItem('youtube_token_expiry');
-    if(S.intervals.youtube) { clearTimeout(S.intervals.youtube); S.intervals.youtube = null; }
-    if(S.intervals.youtubeAuth) { clearTimeout(S.intervals.youtubeAuth); S.intervals.youtubeAuth = null; }
-    S.youtubeUserName = null;
-  }
   document.getElementById(`row-${p}`).className = 'oauth-row';
   document.getElementById(`sd-${p}`).className = 'status-dot off';
   document.getElementById(`st-${p}`).textContent = 'Not connected';
@@ -1194,7 +943,7 @@ function dismiss() {
 function openOAuth() { document.getElementById('oauth-overlay').classList.remove('hidden'); }
 
 function refreshAccDots() {
-  ['twitch','kick','youtube'].forEach(p => {
+  ['twitch','kick'].forEach(p => {
     document.getElementById(`ad-${p}`).className = `acc-dot${S.auth[p]?' on-'+p:''}`;
   });
 }
@@ -1336,7 +1085,7 @@ function setTarget(t) {
 function joinCh(p) {
   const input = document.getElementById(`ci-${p}`);
   const raw = input.value.trim();
-  const ch = p === 'youtube' ? raw : raw.toLowerCase();
+  const ch = raw.toLowerCase();
   if(!ch){input.focus();return;}
   S.channels[p] = ch;
   document.getElementById(`cw-${p}`).classList.add(`act-${p}`);
@@ -1347,7 +1096,6 @@ function joinCh(p) {
   document.getElementById('empty-state')?.remove();
   if(p === 'twitch') connectTwitch(ch);
   else if(p === 'kick') connectKick(ch);
-  else if(p === 'youtube') connectYouTube(ch);
   refreshBanner();
   refreshTargets();
   showToast(`Watching ${ch} on ${CFG[p].name}`);
@@ -1360,13 +1108,6 @@ function leaveCh(p) {
   if(S.intervals[p]) { clearInterval(S.intervals[p]); S.intervals[p] = null; }
   if(p === 'twitch') { S.twitchBroadcasterId = null; S.twitchBroadcasterChannel = null; S.thirdPartyEmotes.twitch = {}; S.nativeEmotes.twitch = {}; S.twitchBadges = { global: {}, channel: {}, broadcasterId: null }; }
   if(p === 'kick')   { S.kickBroadcasterId   = null; S.kickBroadcasterChannel   = null; S.thirdPartyEmotes.kick   = {}; S.nativeEmotes.kick   = {}; }
-  if(p === 'youtube') {
-    if(S.intervals.youtube) { clearTimeout(S.intervals.youtube); S.intervals.youtube = null; }
-    S.youtubeLiveChatId = null;
-    S.youtubeVideoId = null;
-    S.youtubeNextPageToken = '';
-    S.youtubeSeenMessageIds = new Set();
-  }
   document.getElementById(`cw-${p}`).classList.remove(`act-${p}`);
   const btn = document.getElementById(`jb-${p}`);
   btn.textContent = 'Join';
@@ -1374,105 +1115,6 @@ function leaveCh(p) {
   btn.onclick = () => joinCh(p);
   addSys(`Left ${CFG[p].name} channel`);
   refreshTargets();
-}
-
-function parseYouTubeVideoId(input) {
-  const raw = String(input || '').trim();
-  if(!raw) return '';
-  if(/^[a-zA-Z0-9_-]{11}$/.test(raw)) return raw;
-  try {
-    const url = new URL(raw);
-    if(url.hostname.includes('youtu.be')) return (url.pathname || '').replace('/','').slice(0,11);
-    if(url.searchParams.get('v')) return url.searchParams.get('v').slice(0,11);
-    const parts = url.pathname.split('/').filter(Boolean);
-    const embedIdx = parts.findIndex(p => p === 'live' || p === 'embed' || p === 'shorts');
-    if(embedIdx !== -1 && parts[embedIdx + 1]) return parts[embedIdx + 1].slice(0,11);
-  } catch(_) {}
-  return raw.slice(0,11);
-}
-
-const YOUTUBE_MIN_POLL_INTERVAL_MS = 20000;
-const YOUTUBE_MAX_POLL_INTERVAL_MS = 120000;
-
-async function connectYouTube(videoInput) {
-  if(!S.tokens.youtube) {
-    addSys('YouTube: connect your account first.');
-    return;
-  }
-  const videoId = parseYouTubeVideoId(videoInput);
-  if(!videoId || videoId.length !== 11) {
-    addSys('YouTube: enter a valid live video URL or 11-character video ID.');
-    return;
-  }
-  S.youtubeVideoId = videoId;
-  S.youtubeNextPageToken = '';
-  S.youtubeSeenMessageIds = new Set();
-  addSys(`Connecting to YouTube live chat for video ${videoId}...`);
-
-  try {
-    const detailsRes = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,liveStreamingDetails&id=${encodeURIComponent(videoId)}`, {
-      headers: { 'Authorization': `Bearer ${S.tokens.youtube}` }
-    });
-    const details = await detailsRes.json();
-    const item = details?.items?.[0];
-    const liveChatId = item?.liveStreamingDetails?.activeLiveChatId;
-    if(!liveChatId) {
-      addSys('YouTube: no active live chat found for that video (it may not be live).');
-      return;
-    }
-    S.youtubeLiveChatId = liveChatId;
-    const title = item?.snippet?.title || videoId;
-    addSys(`Connected to YouTube: ${title}`);
-    addSys('YouTube polling set to quota-safe mode (minimum 20s between polls for 10h sessions).');
-    pollYouTubeLiveChat();
-  } catch(e) {
-    addSys(`YouTube: could not load live chat (${e.message})`);
-  }
-}
-
-async function pollYouTubeLiveChat() {
-  if(!S.channels.youtube || !S.youtubeLiveChatId || !S.tokens.youtube) return;
-  const params = new URLSearchParams({
-    liveChatId: S.youtubeLiveChatId,
-    part: 'id,snippet,authorDetails',
-    maxResults: '200',
-  });
-  if(S.youtubeNextPageToken) params.set('pageToken', S.youtubeNextPageToken);
-
-  let nextDelay = YOUTUBE_MIN_POLL_INTERVAL_MS;
-  try {
-    const r = await fetch(`https://www.googleapis.com/youtube/v3/liveChat/messages?${params.toString()}`, {
-      headers: { 'Authorization': `Bearer ${S.tokens.youtube}` },
-    });
-    const d = await r.json();
-    if(!r.ok) throw new Error(d.error?.message || `HTTP ${r.status}`);
-    S.youtubeNextPageToken = d.nextPageToken || S.youtubeNextPageToken;
-    const items = d.items || [];
-    items.forEach(msg => {
-      if(!msg?.id || S.youtubeSeenMessageIds.has(msg.id)) return;
-      S.youtubeSeenMessageIds.add(msg.id);
-      if(S.youtubeSeenMessageIds.size > 1200) {
-        const first = S.youtubeSeenMessageIds.values().next().value;
-        S.youtubeSeenMessageIds.delete(first);
-      }
-      if(msg?.snippet?.type !== 'textMessageEvent') return;
-      const text = msg?.snippet?.textMessageDetails?.messageText || '';
-      if(!text) return;
-      const author = msg?.authorDetails?.displayName || 'YouTube';
-      const badge = msg?.authorDetails?.isChatModerator ? 'mod' : null;
-      addMsg('youtube', author, text, badge, null, null, '', { messageId: msg.id });
-    });
-    const apiInterval = Number(d.pollingIntervalMillis) || YOUTUBE_MIN_POLL_INTERVAL_MS;
-    nextDelay = Math.min(YOUTUBE_MAX_POLL_INTERVAL_MS, Math.max(YOUTUBE_MIN_POLL_INTERVAL_MS, apiInterval));
-  } catch(e) {
-    addSys(`YouTube polling error: ${e.message}`);
-    nextDelay = YOUTUBE_MAX_POLL_INTERVAL_MS;
-  }
-
-  if(S.channels.youtube && S.youtubeLiveChatId) {
-    if(S.intervals.youtube) clearTimeout(S.intervals.youtube);
-    S.intervals.youtube = setTimeout(pollYouTubeLiveChat, nextDelay);
-  }
 }
 
 function parseTwitchIrcTags(rawLine) {
@@ -2508,7 +2150,6 @@ function addMsg(p, author, text, badge, emoteMap, _unusedBadgeUrl, authorPrefixH
   const selfNames = [
     S.twitchUserLogin,
     S.kickUserLogin,
-    S.youtubeUserName,
   ].filter(Boolean).map(n => n.toLowerCase());
 
   if(selfNames.length > 0) {
@@ -3139,7 +2780,6 @@ function sendMsg() {
 async function sendToPlatform(p, text) {
   if(p === 'twitch') await sendTwitch(text);
   else if(p === 'kick') await sendKick(text);
-  else if(p === 'youtube') await sendYouTube(text);
 }
 
 async function sendTwitch(text) {
@@ -3232,38 +2872,6 @@ async function sendKick(text) {
     }
   } catch(e) {
     addSys(`Kick send failed: ${e.message}`);
-  }
-}
-
-async function sendYouTube(text) {
-  const token = S.tokens.youtube;
-  const liveChatId = S.youtubeLiveChatId;
-  if(!token) { addSys('YouTube: connect your account first'); return; }
-  if(!liveChatId) { addSys('YouTube: join a live video first'); return; }
-
-  try {
-    const res = await fetch('https://www.googleapis.com/youtube/v3/liveChat/messages?part=snippet', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        snippet: {
-          liveChatId,
-          type: 'textMessageEvent',
-          textMessageDetails: { messageText: text }
-        }
-      })
-    });
-    const data = await res.json().catch(() => ({}));
-    if(!res.ok) {
-      addSys(`YouTube send error: ${data?.error?.message || data?.error || res.status}`);
-      return;
-    }
-    showToast('Sent to YouTube');
-  } catch(e) {
-    addSys(`YouTube send failed: ${e.message}`);
   }
 }
 
