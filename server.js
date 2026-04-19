@@ -1,6 +1,4 @@
 // Friendly Chat - Local Server
-// Kick OAuth calls are forwarded to the cloud proxy (which holds the secret).
-// No Kick credentials are stored locally.
 
 const http = require('http');
 const fs   = require('fs');
@@ -25,18 +23,11 @@ function readBody(req) {
 }
 
 function start(CFG) {
-  const PORT       = CFG.port || 8080;
-  const PROXY_URL  = (CFG.proxy_url || CFG.kick_proxy_url || '').replace(/\/$/, '');
-  const HAS_PROXY  = PROXY_URL && PROXY_URL !== 'YOUR_PROXY_URL_HERE';
-
-  // Pre-fetch Kick client ID from proxy at startup
-  let kickClientId = '';
-  if(HAS_PROXY) {
-    fetch(`${PROXY_URL}/kick-config`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if(d?.client_id) kickClientId = d.client_id; })
-      .catch(e => console.warn('Could not reach proxy for Kick config:', e.message));
-  }
+  const PORT             = CFG.port || 8080;
+  const KICK_CLIENT_ID   = CFG.kick?.client_id     || '';
+  const KICK_CLIENT_SECRET = CFG.kick?.client_secret || '';
+  const YOUTUBE_API_KEY  = CFG.youtube?.api_key     || '';
+  const HAS_KICK         = !!(KICK_CLIENT_ID && KICK_CLIENT_SECRET);
 
   const server = http.createServer(async (req, res) => {
     const pathname = new URL(req.url, `http://localhost:${PORT}`).pathname;
@@ -51,31 +42,47 @@ function start(CFG) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         twitch:  { client_id: CFG.twitch?.client_id  || '' },
-        kick:    { client_id: kickClientId },
-        has_kick_proxy: HAS_PROXY,
+        youtube: { client_id: CFG.youtube?.client_id || '' },
+        kick:    { client_id: KICK_CLIENT_ID },
+        has_kick_proxy: HAS_KICK,
       }));
       return;
     }
 
-    // ── /kick-token — forward to cloud proxy ─────────────────────────────────
+    // ── /kick-token — exchange PKCE auth code for tokens ─────────────────────
     if(pathname === '/kick-token' && req.method === 'POST') {
-      if(!HAS_PROXY) {
+      if(!HAS_KICK) {
         res.writeHead(503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Kick proxy not configured' }));
+        res.end(JSON.stringify({ error: 'Kick credentials not configured' }));
         return;
       }
       try {
-        const body = await readBody(req);
-        // Add redirect_uri for the proxy
-        body.redirect_uri = `http://localhost:${PORT}/friendly-chat.html`;
-        const kickRes = await fetch(`${PROXY_URL}/kick-token`, {
+        const { code, code_verifier } = await readBody(req);
+        const params = new URLSearchParams({
+          grant_type:    'authorization_code',
+          client_id:     KICK_CLIENT_ID,
+          client_secret: KICK_CLIENT_SECRET,
+          redirect_uri:  `http://localhost:${PORT}/friendly-chat.html`,
+          code_verifier,
+          code,
+        });
+        const kickRes = await fetch('https://id.kick.com/oauth/token', {
           method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify(body),
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body:    params.toString(),
         });
         const data = await kickRes.json();
-        res.writeHead(kickRes.status, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(data));
+        if(!kickRes.ok) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: data.error || 'token exchange failed' }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          access_token:  data.access_token,
+          refresh_token: data.refresh_token,
+          expires_in:    data.expires_in,
+        }));
       } catch(e) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: e.message }));
@@ -83,23 +90,38 @@ function start(CFG) {
       return;
     }
 
-    // ── /kick-refresh — forward to cloud proxy ────────────────────────────────
+    // ── /kick-refresh — silently refresh an expired Kick access token ─────────
     if(pathname === '/kick-refresh' && req.method === 'POST') {
-      if(!HAS_PROXY) {
+      if(!HAS_KICK) {
         res.writeHead(503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Kick proxy not configured' }));
+        res.end(JSON.stringify({ error: 'Kick credentials not configured' }));
         return;
       }
       try {
-        const body = await readBody(req);
-        const kickRes = await fetch(`${PROXY_URL}/kick-refresh`, {
+        const { refresh_token } = await readBody(req);
+        const params = new URLSearchParams({
+          grant_type:    'refresh_token',
+          client_id:     KICK_CLIENT_ID,
+          client_secret: KICK_CLIENT_SECRET,
+          refresh_token,
+        });
+        const kickRes = await fetch('https://id.kick.com/oauth/token', {
           method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify(body),
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body:    params.toString(),
         });
         const data = await kickRes.json();
-        res.writeHead(kickRes.status, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(data));
+        if(!kickRes.ok) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: data.error || 'refresh failed' }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          access_token:  data.access_token,
+          refresh_token: data.refresh_token,
+          expires_in:    data.expires_in,
+        }));
       } catch(e) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: e.message }));
@@ -211,7 +233,7 @@ function start(CFG) {
 
   server.listen(PORT, () => {
     console.log(`\n  Friendly Chat running on http://localhost:${PORT}\n`);
-    if(!HAS_PROXY) console.log('  ⚠  Kick proxy not configured — Kick OAuth will not work\n');
+    if(!HAS_KICK) console.log('  ⚠  Kick credentials not configured — Kick OAuth will not work\n');
   });
 
   return server;
