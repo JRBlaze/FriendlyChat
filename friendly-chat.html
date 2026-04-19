@@ -873,6 +873,67 @@ function startOAuth(p) {
   }, 400);
 }
 
+async function promptForRuntimeOAuthConfig(platform) {
+  if(platform === 'youtube') {
+    const clientId = (window.prompt('Enter your YouTube OAuth Client ID:', YOUTUBE_CLIENT_ID_PUB || '') || '').trim();
+    if(!clientId) {
+      showToast('YouTube setup cancelled');
+      return false;
+    }
+    try {
+      const res = await fetch('/oauth-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform: 'youtube', client_id: clientId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if(!res.ok) {
+        showToast(`YouTube config failed: ${data.error || 'unknown error'}`);
+        return false;
+      }
+      YOUTUBE_CLIENT_ID_PUB = clientId;
+      showToast('YouTube OAuth client configured for this app session');
+      return true;
+    } catch(e) {
+      showToast(`YouTube config failed: ${e.message}`);
+      return false;
+    }
+  }
+
+  if(platform === 'kick') {
+    const clientId = (window.prompt('Enter your Kick OAuth Client ID:', KICK_CLIENT_ID_PUB || '') || '').trim();
+    if(!clientId) {
+      showToast('Kick setup cancelled');
+      return false;
+    }
+    const clientSecret = (window.prompt('Enter your Kick OAuth Client Secret:') || '').trim();
+    if(!clientSecret) {
+      showToast('Kick setup cancelled');
+      return false;
+    }
+    try {
+      const res = await fetch('/oauth-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform: 'kick', client_id: clientId, client_secret: clientSecret }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if(!res.ok) {
+        showToast(`Kick config failed: ${data.error || 'unknown error'}`);
+        return false;
+      }
+      KICK_CLIENT_ID_PUB = clientId;
+      showToast('Kick OAuth client configured for this app session');
+      return true;
+    } catch(e) {
+      showToast(`Kick config failed: ${e.message}`);
+      return false;
+    }
+  }
+
+  return false;
+}
+
 async function startYoutubeOAuth() {
   const btn = document.getElementById('btn-youtube');
   btn.textContent = 'Connecting...';
@@ -890,9 +951,12 @@ async function startYoutubeOAuth() {
     } catch(_) {}
   }
   if(!clientId) {
-    resetConnectBtn('youtube');
-    showToast('YouTube OAuth is not configured. Add youtube.client_id to config.json.');
-    return;
+    const configured = await promptForRuntimeOAuthConfig('youtube');
+    if(!configured) {
+      resetConnectBtn('youtube');
+      return;
+    }
+    clientId = YOUTUBE_CLIENT_ID_PUB;
   }
 
   const { verifier, challenge } = await generatePKCE();
@@ -986,9 +1050,12 @@ async function startKickOAuth() {
   }
 
   if(!clientId) {
-    resetConnectBtn('kick');
-    showToast('Kick OAuth is not configured. Add kick.client_id and kick.client_secret to config.json.');
-    return;
+    const configured = await promptForRuntimeOAuthConfig('kick');
+    if(!configured) {
+      resetConnectBtn('kick');
+      return;
+    }
+    clientId = KICK_CLIENT_ID_PUB;
   }
 
   // Generate PKCE challenge
