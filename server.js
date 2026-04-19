@@ -25,18 +25,31 @@ function readBody(req) {
 
 function start(CFG) {
   const PORT = CFG.port || 8080;
+  const sanitizeConfigValue = (value = '') => {
+    const raw = String(value || '').trim();
+    if(!raw) return '';
+    if(/^YOUR[_\s-]/i.test(raw)) return '';
+    if(/^REPLACE[_\s-]/i.test(raw)) return '';
+    if(/^CHANGE[_\s-]/i.test(raw)) return '';
+    if(/^<.*>$/.test(raw)) return '';
+    return raw;
+  };
   let KICK_CLIENT_ID = '';
   let KICK_CLIENT_SECRET = '';
   let YOUTUBE_CLIENT_ID = '';
+  let YOUTUBE_CLIENT_SECRET = '';
+  let YOUTUBE_API_KEY = '';
   let HAS_KICK_OAUTH_CONFIG = false;
   let HAS_YOUTUBE_OAUTH_CONFIG = false;
 
   const applyOAuthConfigFromCfg = () => {
-    KICK_CLIENT_ID = CFG.kick?.client_id || '';
-    KICK_CLIENT_SECRET = CFG.kick?.client_secret || '';
-    YOUTUBE_CLIENT_ID = CFG.youtube?.client_id || '';
+    KICK_CLIENT_ID = sanitizeConfigValue(CFG.kick?.client_id);
+    KICK_CLIENT_SECRET = sanitizeConfigValue(CFG.kick?.client_secret);
+    YOUTUBE_CLIENT_ID = sanitizeConfigValue(CFG.youtube?.client_id);
+    YOUTUBE_CLIENT_SECRET = sanitizeConfigValue(CFG.youtube?.client_secret);
+    YOUTUBE_API_KEY = sanitizeConfigValue(CFG.youtube?.api_key);
     HAS_KICK_OAUTH_CONFIG = !!(KICK_CLIENT_ID && KICK_CLIENT_SECRET);
-    HAS_YOUTUBE_OAUTH_CONFIG = !!YOUTUBE_CLIENT_ID;
+    HAS_YOUTUBE_OAUTH_CONFIG = !!(YOUTUBE_CLIENT_ID && YOUTUBE_CLIENT_SECRET && YOUTUBE_API_KEY);
   };
   applyOAuthConfigFromCfg();
 
@@ -56,7 +69,10 @@ function start(CFG) {
         kick:    { client_id: KICK_CLIENT_ID },
         youtube: { client_id: YOUTUBE_CLIENT_ID },
         has_kick_oauth_config: HAS_KICK_OAUTH_CONFIG,
+        has_kick_client_secret: !!KICK_CLIENT_SECRET,
         has_youtube_oauth_config: HAS_YOUTUBE_OAUTH_CONFIG,
+        has_youtube_client_secret: !!YOUTUBE_CLIENT_SECRET,
+        has_youtube_api_key: !!YOUTUBE_API_KEY,
       }));
       return;
     }
@@ -66,16 +82,17 @@ function start(CFG) {
       try {
         const body = await readBody(req);
         const platform = String(body.platform || '').toLowerCase();
-        const clientId = String(body.client_id || '').trim();
-        const clientSecret = String(body.client_secret || '').trim();
+        const clientId = sanitizeConfigValue(body.client_id);
+        const clientSecret = sanitizeConfigValue(body.client_secret);
+        const apiKey = sanitizeConfigValue(body.api_key);
 
         if(platform === 'youtube') {
-          if(!clientId) {
+          if(!clientId || !clientSecret || !apiKey) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'youtube client_id is required' }));
+            res.end(JSON.stringify({ error: 'youtube client_id, client_secret, and api_key are required' }));
             return;
           }
-          CFG.youtube = { ...(CFG.youtube || {}), client_id: clientId };
+          CFG.youtube = { ...(CFG.youtube || {}), client_id: clientId, client_secret: clientSecret, api_key: apiKey };
           applyOAuthConfigFromCfg();
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: true, has_youtube_oauth_config: HAS_YOUTUBE_OAUTH_CONFIG }));

@@ -367,7 +367,10 @@ let TWITCH_CLIENT_ID  = '';
 let KICK_CLIENT_ID_PUB = '';
 let YOUTUBE_CLIENT_ID_PUB = '';
 let HAS_KICK_OAUTH_CONFIG = false;
+let HAS_KICK_CLIENT_SECRET = false;
 let HAS_YOUTUBE_OAUTH_CONFIG = false;
+let HAS_YOUTUBE_CLIENT_SECRET = false;
+let HAS_YOUTUBE_API_KEY = false;
 
 async function loadConfig(retries = 5, delayMs = 800) {
   dbg('config', 'Loading /config', { retries, delayMs });
@@ -380,13 +383,19 @@ async function loadConfig(retries = 5, delayMs = 800) {
       KICK_CLIENT_ID_PUB = c.kick?.client_id    || '';
       YOUTUBE_CLIENT_ID_PUB = c.youtube?.client_id || '';
       HAS_KICK_OAUTH_CONFIG = !!c.has_kick_oauth_config;
+      HAS_KICK_CLIENT_SECRET = !!c.has_kick_client_secret;
       HAS_YOUTUBE_OAUTH_CONFIG = !!c.has_youtube_oauth_config;
+      HAS_YOUTUBE_CLIENT_SECRET = !!c.has_youtube_client_secret;
+      HAS_YOUTUBE_API_KEY = !!c.has_youtube_api_key;
       dbg('config', 'Loaded /config successfully', {
         hasKickClientId: !!KICK_CLIENT_ID_PUB,
         hasKickOAuthConfig: HAS_KICK_OAUTH_CONFIG,
+        hasKickClientSecret: HAS_KICK_CLIENT_SECRET,
         hasTwitchClientId: !!TWITCH_CLIENT_ID,
         hasYoutubeClientId: !!YOUTUBE_CLIENT_ID_PUB,
-        hasYoutubeOAuthConfig: HAS_YOUTUBE_OAUTH_CONFIG
+        hasYoutubeOAuthConfig: HAS_YOUTUBE_OAUTH_CONFIG,
+        hasYoutubeClientSecret: HAS_YOUTUBE_CLIENT_SECRET,
+        hasYoutubeApiKey: HAS_YOUTUBE_API_KEY
       });
       CFG.twitch.url = `https://id.twitch.tv/oauth2/authorize?client_id=${TWITCH_CLIENT_ID}&scope=chat%3Aread+chat%3Aedit+user%3Awrite%3Achat+moderator%3Amanage%3Abanned_users+moderator%3Amanage%3Achat_messages+moderator%3Aread%3Afollowers+user%3Aread%3Aemotes&response_type=token`;
       return;
@@ -897,11 +906,21 @@ async function promptForRuntimeOAuthConfig(platform) {
       showToast('YouTube setup cancelled');
       return false;
     }
+    const clientSecret = (window.prompt('Enter your YouTube OAuth Client Secret:') || '').trim();
+    if(!clientSecret) {
+      showToast('YouTube setup cancelled');
+      return false;
+    }
+    const apiKey = (window.prompt('Enter your YouTube API Key:') || '').trim();
+    if(!apiKey) {
+      showToast('YouTube setup cancelled');
+      return false;
+    }
     try {
       const res = await fetch('/oauth-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platform: 'youtube', client_id: clientId }),
+        body: JSON.stringify({ platform: 'youtube', client_id: clientId, client_secret: clientSecret, api_key: apiKey }),
       });
       const data = await res.json().catch(() => ({}));
       if(!res.ok) {
@@ -910,6 +929,8 @@ async function promptForRuntimeOAuthConfig(platform) {
       }
       YOUTUBE_CLIENT_ID_PUB = clientId;
       HAS_YOUTUBE_OAUTH_CONFIG = true;
+      HAS_YOUTUBE_CLIENT_SECRET = true;
+      HAS_YOUTUBE_API_KEY = true;
       showToast('YouTube OAuth client configured for this app session');
       return true;
     } catch(e) {
@@ -942,6 +963,7 @@ async function promptForRuntimeOAuthConfig(platform) {
       }
       KICK_CLIENT_ID_PUB = clientId;
       HAS_KICK_OAUTH_CONFIG = true;
+      HAS_KICK_CLIENT_SECRET = true;
       showToast('Kick OAuth client configured for this app session');
       return true;
     } catch(e) {
@@ -966,11 +988,13 @@ async function startYoutubeOAuth() {
         const d = await r.json();
         clientId = d.youtube?.client_id || '';
         HAS_YOUTUBE_OAUTH_CONFIG = !!d.has_youtube_oauth_config;
+        HAS_YOUTUBE_CLIENT_SECRET = !!d.has_youtube_client_secret;
+        HAS_YOUTUBE_API_KEY = !!d.has_youtube_api_key;
         if(clientId) YOUTUBE_CLIENT_ID_PUB = clientId;
       }
     } catch(_) {}
   }
-  if(!clientId || !HAS_YOUTUBE_OAUTH_CONFIG) {
+  if(!clientId || !HAS_YOUTUBE_OAUTH_CONFIG || !HAS_YOUTUBE_CLIENT_SECRET || !HAS_YOUTUBE_API_KEY) {
     const configured = await promptForRuntimeOAuthConfig('youtube');
     if(!configured) {
       resetConnectBtn('youtube');
@@ -1065,12 +1089,13 @@ async function startKickOAuth() {
         const d = await r.json();
         clientId = d.kick?.client_id || '';
         HAS_KICK_OAUTH_CONFIG = !!d.has_kick_oauth_config;
+        HAS_KICK_CLIENT_SECRET = !!d.has_kick_client_secret;
         if(clientId) KICK_CLIENT_ID_PUB = clientId;
       }
     } catch(e) {}
   }
 
-  if(!clientId || !HAS_KICK_OAUTH_CONFIG) {
+  if(!clientId || !HAS_KICK_OAUTH_CONFIG || !HAS_KICK_CLIENT_SECRET) {
     const configured = await promptForRuntimeOAuthConfig('kick');
     if(!configured) {
       resetConnectBtn('kick');
