@@ -1,6 +1,5 @@
 {
   "twitch":  { "client_id": "6a1bqli3xxei93r1zu6msidt5xf4kj" },
   "kick":    { "client_id": "YOUR_KICK_CLIENT_ID", "client_secret": "YOUR_KICK_CLIENT_SECRET" },
-  "youtube": { "client_id": "YOUR_GOOGLE_OAUTH_CLIENT_ID" },
   "port": 8080
 }
