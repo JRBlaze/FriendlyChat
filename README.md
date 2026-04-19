@@ -61,7 +61,7 @@ Friendly Chat now performs Kick token exchange locally, so you do **not** need t
 }
 ```
 
-If either `kick.client_id` or `kick.client_secret` is missing (or left as placeholders), Kick sign-in will prompt you to provide both at runtime before connecting.
+If `kick.client_id` or `kick.client_secret` is missing, Kick sign-in will be disabled until they are provided.
 
 ## YouTube OAuth setup (bring your own Google OAuth client)
 
@@ -82,15 +82,13 @@ Friendly Chat supports YouTube live chat by using **your own Google OAuth client
     "client_secret": "YOUR_KICK_CLIENT_SECRET"
   },
   "youtube": {
-    "client_id": "YOUR_GOOGLE_OAUTH_CLIENT_ID",
-    "client_secret": "YOUR_GOOGLE_OAUTH_CLIENT_SECRET",
-    "api_key": "YOUR_YOUTUBE_DATA_API_KEY"
+    "client_id": "YOUR_GOOGLE_OAUTH_CLIENT_ID"
   },
   "port": 8080
 }
 ```
 
-If any of `youtube.client_id`, `youtube.client_secret`, or `youtube.api_key` are missing (or left as placeholders), YouTube sign-in will prompt you to provide them at runtime before connecting.
+If `youtube.client_id` is missing, YouTube sign-in will be disabled until it is provided.
 
 ### YouTube quota behavior (10-hour session safety)
 
