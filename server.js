@@ -57,6 +57,12 @@ function start(CFG) {
 
     // ── /config — public credentials only ───────────────────────────────────
     if(pathname === '/config' && req.method === 'GET') {
+      if(PROXY_URL && !kickClientId) {
+        try {
+          const r = await fetch(`${PROXY_URL}/kick-config`);
+          if(r.ok) { const d = await r.json(); if(d?.client_id) kickClientId = d.client_id; }
+        } catch(e) {}
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         twitch:   { client_id: CFG.twitch?.client_id || '' },
