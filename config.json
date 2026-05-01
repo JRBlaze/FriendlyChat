@@ -1,5 +1,5 @@
 {
   "twitch":  { "client_id": "6a1bqli3xxei93r1zu6msidt5xf4kj" },
-  "kick":    { "proxy_url": "https://friendly-chat-kick-proxy.jrblaze.workers.dev/kick-config" },
+  "kick":    { "proxy_url": "https://friendly-chat-kick-proxy.jrblaze.workers.dev" },
   "port": 8080
 }
