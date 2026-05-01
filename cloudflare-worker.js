@@ -30,6 +30,9 @@ export default {
 
     // Exchanges a PKCE auth code for access + refresh tokens
     if (url.pathname === '/kick-token' && request.method === 'POST') {
+      if (!env.KICK_CLIENT_ID || !env.KICK_CLIENT_SECRET) {
+        return json({ error: 'Worker secrets not configured — run: wrangler secret put KICK_CLIENT_ID && wrangler secret put KICK_CLIENT_SECRET' }, 500, origin);
+      }
       try {
         const { code, code_verifier, redirect_uri } = await request.json();
         const params = new URLSearchParams({
@@ -61,6 +64,9 @@ export default {
 
     // Silently refreshes an expired Kick access token
     if (url.pathname === '/kick-refresh' && request.method === 'POST') {
+      if (!env.KICK_CLIENT_ID || !env.KICK_CLIENT_SECRET) {
+        return json({ error: 'Worker secrets not configured — run: wrangler secret put KICK_CLIENT_ID && wrangler secret put KICK_CLIENT_SECRET' }, 500, origin);
+      }
       try {
         const { refresh_token } = await request.json();
         const params = new URLSearchParams({

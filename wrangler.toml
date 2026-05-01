@@ -1,7 +1,11 @@
-name            = "friendly-chat-kick-proxy"
-main            = "cloudflare-worker.js"
+name               = "friendly-chat-kick-proxy"
+main               = "cloudflare-worker.js"
 compatibility_date = "2024-09-23"
+workers_dev        = true
 
 # Secrets are NOT stored here — set them with:
 #   wrangler secret put KICK_CLIENT_ID
 #   wrangler secret put KICK_CLIENT_SECRET
+#
+# Then deploy with:
+#   wrangler deploy
