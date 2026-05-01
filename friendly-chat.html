@@ -761,7 +761,7 @@ async function startKickOAuth() {
 
   if(!clientId) {
     resetConnectBtn('kick');
-    showToast('Kick: proxy not reachable — check your internet connection');
+    showToast('Kick: client_id not set — add your Kick Client ID and Client Secret to config.json');
     return;
   }
 
@@ -1133,6 +1133,7 @@ function twitchUserNoticeSummary(tags = {}, fallbackText = '') {
   const msgId = tags['msg-id'] || 'notice';
   const name = tags['display-name'] || tags['login'] || tags['msg-param-recipient-display-name'] || 'Someone';
   const count = tags['msg-param-cumulative-months'] || tags['msg-param-months'] || '';
+  const giftCount = tags['msg-param-mass-gift-count'] || tags['msg-param-gift-months'] || tags['msg-param-sender-count'] || '';
   const plan = tags['msg-param-sub-plan-name'] || tags['msg-param-sub-plan'] || '';
   const tierLabel = tags['msg-param-sub-plan'] === '1000' ? 'Tier 1'
     : tags['msg-param-sub-plan'] === '2000' ? 'Tier 2'
@@ -1144,8 +1145,8 @@ function twitchUserNoticeSummary(tags = {}, fallbackText = '') {
     resub: `${name} resubscribed${count ? ` (${count} months)` : ''}${tierLabel ? ` (${tierLabel})` : ''}.`,
     subgift: `${name} gifted a sub to ${(tags['msg-param-recipient-display-name'] || tags['msg-param-recipient-user-name'] || 'a viewer')}.`,
     anonsubgift: `An anonymous user gifted a sub to ${(tags['msg-param-recipient-display-name'] || tags['msg-param-recipient-user-name'] || 'a viewer')}.`,
-    submysterygift: `${name} gifted ${tags['msg-param-mass-gift-count'] || '?'} subs to the community.`,
-    anonsubmysterygift: `An anonymous user gifted ${tags['msg-param-mass-gift-count'] || '?'} subs to the community.`,
+    submysterygift: `${name} gifted ${giftCount || '?'} subs to the community.`,
+    anonsubmysterygift: `An anonymous user gifted ${giftCount || '?'} subs to the community.`,
     giftpaidupgrade: `${name} continued their gifted sub.`,
     anongiftpaidupgrade: `${name} continued an anonymous gifted sub.`,
     primepaidupgrade: `${name} upgraded from Prime to a paid sub.`,
@@ -1163,15 +1164,77 @@ function twitchUserNoticeSummary(tags = {}, fallbackText = '') {
   return `${summary}${extraText}`.trim();
 }
 
+function firstPresent(...values) {
+  for(const value of values) {
+    if(value !== undefined && value !== null && value !== '') return value;
+  }
+  return null;
+}
+
+function usernameFrom(value) {
+  if(!value) return null;
+  if(typeof value === 'string') return value;
+  return value.username || value.name || value.login || value.slug || null;
+}
+
+function safeJsonParse(value, fallback = {}) {
+  if(typeof value !== 'string') return value || fallback;
+  if(!value) return fallback;
+  try { return JSON.parse(value); }
+  catch(e) {
+    console.warn('Could not parse event payload:', e.message);
+    return fallback;
+  }
+}
+
+function isPusherProtocolEvent(eventName = '') {
+  return eventName.startsWith('pusher:') || eventName.startsWith('pusher_internal:');
+}
+
+function kickEventShortName(eventName = '') {
+  return eventName.replace(/^App\\Events\\/, '').replace(/Event$/, '');
+}
+
 function formatKickEventSummary(eventName, payload = {}) {
-  const sender = payload?.sender?.username || payload?.username || payload?.user?.username || 'Someone';
-  const count = payload?.gifter_total || payload?.gift_count || payload?.total || payload?.count || payload?.amount;
-  const recipient = payload?.receiver?.username || payload?.recipient?.username || payload?.target?.username;
+  const shortName = kickEventShortName(eventName);
+  const sender = firstPresent(
+    payload?.gifter_username,
+    payload?.sender?.username,
+    payload?.username,
+    usernameFrom(payload?.user),
+    payload?.banned_by?.username,
+    payload?.host_username
+  ) || 'Someone';
+  const giftedUsernames = Array.isArray(payload?.gifted_usernames) ? payload.gifted_usernames : [];
+  const luckyUsernames = Array.isArray(payload?.usernames) ? payload.usernames : [];
+  const recipients = Array.isArray(payload?.recipients) ? payload.recipients : [];
+  const count = firstPresent(
+    giftedUsernames.length || null,
+    luckyUsernames.length || null,
+    recipients.length || null,
+    payload?.gifted_quantity,
+    payload?.gift_count,
+    payload?.quantity,
+    payload?.total,
+    payload?.count,
+    payload?.amount
+  );
+  const recipient = firstPresent(
+    usernameFrom(payload?.receiver),
+    usernameFrom(payload?.recipient),
+    usernameFrom(payload?.target),
+    usernameFrom(recipients[0]),
+    giftedUsernames[0],
+    luckyUsernames[0]
+  );
   const map = {
     'App\\Events\\SubscriptionEvent': `${sender} subscribed.`,
+    'App\\Events\\ChannelSubscriptionEvent': `${sender} subscribed.`,
     'App\\Events\\ResubscriptionEvent': `${sender} resubscribed.`,
-    'App\\Events\\GiftedSubscriptionsEvent': `${sender} gifted ${count || '?'} subs.`,
+    'App\\Events\\GiftedSubscriptionsEvent': `${sender} gifted ${count || '?'} subs${recipient && count === 1 ? ` to ${recipient}` : ''}.`,
     'App\\Events\\SubscriptionGiftedEvent': `${sender} gifted a sub${recipient ? ` to ${recipient}` : ''}.`,
+    'App\\Events\\LuckyUsersWhoGotGiftSubscriptionsEvent': `${sender} gifted ${count || '?'} subs${luckyUsernames.length ? ` to ${luckyUsernames.slice(0, 3).join(', ')}${luckyUsernames.length > 3 ? ', and more' : ''}` : ''}.`,
+    'App\\Events\\GiftsLeaderboardUpdated': `${sender} gifted ${count || '?'} subs.`,
     'App\\Events\\ChatroomClearEvent': 'Chat was cleared by a moderator.',
     'App\\Events\\HypeTrainEvent': `Hype Train update${count ? ` (${count})` : ''}.`,
     'App\\Events\\HypeTrainStartedEvent': `${sender} started a Hype Train!`,
@@ -1181,7 +1244,12 @@ function formatKickEventSummary(eventName, payload = {}) {
     'App\\Events\\ChannelPointsRedeemedEvent': `${sender} redeemed channel points.`,
     'App\\Events\\PollUpdateEvent': 'Poll updated.',
   };
-  return map[eventName] || `${sender} triggered ${eventName.replace(/^App\\\\Events\\\\/, '').replace(/Event$/, '')}.`;
+  if(map[eventName]) return map[eventName];
+  if(shortName.includes('Gift') && shortName.includes('Subscription')) {
+    return `${sender} gifted ${count || 1} sub${Number(count) === 1 ? '' : 's'}${recipient && Number(count) === 1 ? ` to ${recipient}` : ''}.`;
+  }
+  if(shortName.includes('Subscription')) return `${sender} subscribed.`;
+  return `${sender} triggered ${shortName}.`;
 }
 
 // ---- Twitch IRC over WebSocket ----
@@ -1377,6 +1445,7 @@ function connectKick(channel, reconnectAttempt = 0) {
     .then(data => {
       const chatroomId = data.chatroom?.id;
       if(!chatroomId) { addSys('Kick: could not find channel'); return; }
+      const channelId = data.id || data.channel_id || null;
 
       // Store the broadcaster's numeric user_id so sendKick can use it directly
       // without needing another lookup from the server
@@ -1408,13 +1477,20 @@ function connectKick(channel, reconnectAttempt = 0) {
       ws.onopen = () => {};
 
       ws.onmessage = (e) => {
-        const msg = JSON.parse(e.data);
+        const msg = safeJsonParse(e.data, null);
+        if(!msg?.event) return;
         // Pusher connection established — subscribe to chatroom channel
         if(msg.event === 'pusher:connection_established') {
           ws.send(JSON.stringify({
             event: 'pusher:subscribe',
             data: { auth: '', channel: `chatrooms.${chatroomId}.v2` }
           }));
+          if(channelId) {
+            ws.send(JSON.stringify({
+              event: 'pusher:subscribe',
+              data: { auth: '', channel: `channel.${channelId}` }
+            }));
+          }
           addSys(`Connected to Kick: ${channel}`);
           reconnectAttempt = 0;
           // Send a periodic client ping so idle rooms stay alive.
@@ -1427,16 +1503,16 @@ function connectKick(channel, reconnectAttempt = 0) {
           fetchKickHistory(chatroomId);
           return;
         }
+        // Suppress Pusher protocol chatter such as pusher:pong and subscription acks.
+        if(isPusherProtocolEvent(msg.event) && msg.event !== 'pusher:ping') return;
         // Required by Pusher protocol to keep the socket from timing out.
         if(msg.event === 'pusher:ping') {
           ws.send(JSON.stringify({ event: 'pusher:pong', data: {} }));
           return;
         }
-        const payload = typeof msg.data === 'string'
-          ? (msg.data ? JSON.parse(msg.data) : {})
-          : (msg.data || {});
+        const payload = safeJsonParse(msg.data, {});
         if(msg.event !== 'App\\Events\\ChatMessageEvent') {
-          if(S.channels.kick === channel && msg.event && msg.event !== 'pusher_internal:subscription_succeeded') {
+          if(S.channels.kick === channel && msg.event) {
             const summary = formatKickEventSummary(msg.event, payload || {});
             if(summary) addMsg('kick', 'KICK', summary, null, null, null, '');
           }

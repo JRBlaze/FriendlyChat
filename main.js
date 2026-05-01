@@ -7,7 +7,7 @@ const fs   = require('fs');
 // Start server immediately — config.json holds all public credentials,
 // Kick secret is on the cloud proxy (never on this machine).
 const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
-require('./server').start(cfg);
+const localServer = require('./server').start(cfg);
 
 // ── Kick emote fetcher via hidden BrowserWindow (bypasses Cloudflare) ─────────
 ipcMain.handle('kick-fetch-emotes', async (event, channel) => {
@@ -52,7 +52,18 @@ function createWindow() {
     autoHideMenuBar: true,
   });
 
-  setTimeout(() => mainWindow.loadURL('http://localhost:8080/friendly-chat.html'), 1500);
+  const loadApp = () => {
+    if(mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.loadURL(`http://localhost:${cfg.port || 8080}/friendly-chat.html`);
+    }
+  };
+  // Prefer loading as soon as the server is listening, with a fallback timeout.
+  if(localServer.listening) {
+    loadApp();
+  } else {
+    localServer.once('listening', loadApp);
+    setTimeout(loadApp, 1500);
+  }
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     const isOAuth =
