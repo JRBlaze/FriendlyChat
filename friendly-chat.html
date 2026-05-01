@@ -761,7 +761,7 @@ async function startKickOAuth() {
 
   if(!clientId) {
     resetConnectBtn('kick');
-    showToast('Kick: client_id not set — add your Kick Client ID and Client Secret to config.json');
+    showToast('Kick: could not reach proxy — check kick.proxy_url in config.json');
     return;
   }
 
