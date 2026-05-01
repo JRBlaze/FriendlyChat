@@ -1,5 +1,5 @@
 {
   "twitch":  { "client_id": "6a1bqli3xxei93r1zu6msidt5xf4kj" },
-  "kick":    { "client_id": "01KM9M6876PX3CJ83FHPD1J3C2", "client_secret": "0b33d1a02a99bf087747e07f6ff0a33cc92f64f225c6274e29934949c97cbd76" },
+  "kick":    { "proxy_url": "" },
   "port": 8080
 }
