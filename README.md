@@ -43,23 +43,6 @@ Then try opening the app again. Alternatively go to **System Settings → Privac
 
 You can watch and read chats without signing in. Signing in is only required to send messages.
 
-## Development
-
-```bash
-git clone https://github.com/JRBlaze/FriendlyChat.git
-cd FriendlyChat
-npm install
-npm start
-```
-
-Build installers:
-
-```bash
-npm run build
-npm run build:mac
-npm run build:linux
-```
-
 ## Built with
 
 - [Electron](https://www.electronjs.org)
