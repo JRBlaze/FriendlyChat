@@ -18,6 +18,8 @@ Friendly Chat lets you watch and participate in Twitch and Kick chats in one pla
 - Click a username to reply, timeout, ban, or delete messages
 - Adjustable font size that saves between sessions
 
+![App Screenshot](FCScreenshot.png)
+
 ## Download
 
 Grab the latest installer for your platform from the [Releases](../../releases) page.
