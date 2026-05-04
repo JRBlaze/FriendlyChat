@@ -1,6 +1,6 @@
 // Friendly Chat - Electron Main Process
 
-const { app, BrowserWindow, shell, ipcMain } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, nativeImage } = require('electron');
 const path = require('path');
 const fs   = require('fs');
 
@@ -39,11 +39,30 @@ function fetchKickEmotesViaWindow(channel) {
 // ── Window ────────────────────────────────────────────────────────────────────
 let mainWindow;
 
+function getLinuxAppIcon() {
+  if(process.platform !== 'linux') return undefined;
+
+  // Prefer resource path in packaged builds so the icon can be read by the OS.
+  const candidates = [
+    path.join(process.resourcesPath || '', 'icon.png'),
+    path.join(__dirname, 'icon.png'),
+  ];
+
+  for(const iconPath of candidates) {
+    if(iconPath && fs.existsSync(iconPath)) {
+      const image = nativeImage.createFromPath(iconPath);
+      if(!image.isEmpty()) return image;
+    }
+  }
+
+  return undefined;
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280, height: 800, minWidth: 520, minHeight: 600,
     title: 'Friendly Chat',
-    icon: process.platform === 'linux' ? path.join(__dirname, 'icon.png') : undefined,
+    icon: getLinuxAppIcon(),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
