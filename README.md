@@ -3,7 +3,7 @@
 A desktop app that merges live chat from Twitch and Kick into one unified window. Built with Electron.
 
 ![Platform Support](https://img.shields.io/badge/platform-Windows%20%7C%20Mac%20%7C%20Linux-blue)
-![Version](https://img.shields.io/badge/version-1.2.8-green)
+![Version](https://img.shields.io/badge/version-1.2.9-green)
 
 ## What it does
 
@@ -17,6 +17,7 @@ Friendly Chat lets you watch and participate in Twitch and Kick chats in one pla
 - Tab autocomplete for emotes (`:emote`) and mentions (`@username`)
 - Click a username to reply, timeout, ban, or delete messages
 - Adjustable font size that saves between sessions
+- Light, dark, and match-system theme modes
 
 ![App Screenshot](FCScreenshot.png)
 

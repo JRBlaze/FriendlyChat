@@ -5,8 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Friendly Chat</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script>
+(function applyInitialTheme() {
+  const allowedModes = new Set(['system', 'dark', 'light']);
+  let mode = 'system';
+  try {
+    const saved = localStorage.getItem('themeMode');
+    if(allowedModes.has(saved)) mode = saved;
+  } catch(_) {}
+  const systemPrefersLight = window.matchMedia?.('(prefers-color-scheme: light)').matches;
+  document.documentElement.dataset.themeMode = mode;
+  document.documentElement.dataset.theme = mode === 'system'
+    ? (systemPrefersLight ? 'light' : 'dark')
+    : mode;
+})();
+</script>
 <style>
 :root {
+  color-scheme: dark;
   --chat-font-size: 13px;
   --bg: #0d0d0f;
   --surface: #16161a;
@@ -15,8 +31,8 @@
   --border: rgba(255,255,255,0.07);
   --border2: rgba(255,255,255,0.12);
   --text: #e8e8f0;
-  --text-muted: #6b6b80;
-  --text-dim: #3d3d50;
+  --text-muted: #8b8ba0;
+  --text-dim: #57576b;
   --twitch: #9146ff;
   --twitch-dim: rgba(145,70,255,0.15);
   --twitch-border: rgba(145,70,255,0.35);
@@ -24,12 +40,39 @@
   --kick-dim: rgba(83,252,24,0.12);
   --kick-border: rgba(83,252,24,0.3);
   --accent: #7c6bff;
+  --link: #7c9fff;
+  --link-hover: #a8bfff;
+  --overlay-bg: rgba(0,0,0,0.85);
+  --menu-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+html[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f5f7fb;
+  --surface: #ffffff;
+  --surface2: #f0f3f9;
+  --surface3: #e3e8f2;
+  --border: rgba(23,31,56,0.10);
+  --border2: rgba(23,31,56,0.18);
+  --text: #171b2a;
+  --text-muted: #657083;
+  --text-dim: #9aa4b7;
+  --twitch: #7b35e8;
+  --twitch-dim: rgba(123,53,232,0.12);
+  --twitch-border: rgba(123,53,232,0.30);
+  --kick: #1f9e00;
+  --kick-dim: rgba(31,158,0,0.12);
+  --kick-border: rgba(31,158,0,0.28);
+  --accent: #5f55e8;
+  --link: #315ed8;
+  --link-hover: #1f46b8;
+  --overlay-bg: rgba(15,23,42,0.42);
+  --menu-shadow: 0 10px 30px rgba(23,31,56,0.16);
 }
 *{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden;transition:background 0.2s,color 0.2s;}
 
 /* OAUTH MODAL */
-#oauth-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;z-index:1000;backdrop-filter:blur(4px);}
+#oauth-overlay{position:fixed;inset:0;background:var(--overlay-bg);display:flex;align-items:center;justify-content:center;z-index:1000;backdrop-filter:blur(4px);}
 #oauth-overlay.hidden{display:none;}
 .oauth-modal{background:var(--surface);border:1px solid var(--border2);border-radius:16px;width:480px;max-width:95vw;overflow:hidden;}
 .oauth-header{padding:24px 28px 20px;border-bottom:1px solid var(--border);}
@@ -84,6 +127,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .acc-dot{width:6px;height:6px;border-radius:50%;background:var(--text-dim);transition:background 0.3s;}
 .acc-dot.on-twitch{background:var(--twitch);}
 .acc-dot.on-kick{background:var(--kick);}
+.theme-control{display:flex;align-items:center;gap:7px;flex-shrink:0;}
+.theme-label{font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace;letter-spacing:0.06em;color:var(--text-dim);}
+.theme-select{height:32px;min-width:118px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text-muted);font-size:12px;font-family:'DM Sans',sans-serif;padding:0 28px 0 10px;outline:none;cursor:pointer;transition:border-color 0.15s,color 0.15s,background 0.15s;}
+.theme-select:hover,.theme-select:focus{border-color:var(--border2);color:var(--text);background:var(--surface3);}
 
 .app-body{flex:1;display:flex;overflow:hidden;min-height:0;}
 .chat-col{flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;}
@@ -123,8 +170,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .m-author.kick{color:var(--kick);}
 .m-colon{color:var(--text-dim);margin-right:3px;font-size:var(--chat-font-size);}
 .m-body{font-size:var(--chat-font-size);color:var(--text);line-height:1.4;word-break:break-word;}
-.chat-link{color:#7c9fff;text-decoration:underline;text-underline-offset:2px;word-break:break-all;}
-.chat-link:hover{color:#a8bfff;}
+.chat-link{color:var(--link);text-decoration:underline;text-underline-offset:2px;word-break:break-all;}
+.chat-link:hover{color:var(--link-hover);}
 .twitch-emote{width:28px;height:28px;vertical-align:middle;margin:0 1px;}
 .kick-emote{width:28px;height:28px;vertical-align:middle;margin:0 1px;}
 .thirdparty-emote{height:28px;width:auto;vertical-align:middle;margin:0 1px;}
@@ -191,7 +238,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .emote-grid-item img{width:28px;height:28px;object-fit:contain;}
 
 /* User action menu */
-.user-menu{position:fixed;background:var(--surface);border:1px solid var(--border2);border-radius:10px;min-width:180px;z-index:300;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.4);}
+.user-menu{position:fixed;background:var(--surface);border:1px solid var(--border2);border-radius:10px;min-width:180px;z-index:300;overflow:hidden;box-shadow:var(--menu-shadow);}
 .user-menu.hidden{display:none;}
 .user-menu-name{padding:10px 14px;font-size:12px;font-weight:500;font-family:'JetBrains Mono',monospace;color:var(--text-muted);border-bottom:1px solid var(--border);background:var(--surface2);}
 .user-menu-actions{display:flex;flex-direction:column;}
@@ -262,6 +309,14 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
         <button class="join-btn" id="jb-kick" onclick="joinCh('kick')">Join</button>
       </div>
     </div>
+    <label class="theme-control" for="theme-select">
+      <span class="theme-label">THEME</span>
+      <select class="theme-select" id="theme-select" onchange="setThemeMode(this.value)" title="Choose theme">
+        <option value="system">Match system</option>
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
+      </select>
+    </label>
     <button class="acc-btn" onclick="openOAuth()">
       <div class="acc-dots">
         <div class="acc-dot" id="ad-twitch"></div>
@@ -984,6 +1039,41 @@ function applyFilter() {
     m.classList.toggle('hide', !S.filter.has(m.dataset.platform));
   });
 }
+
+
+// ── Theme control ────────────────────────────────────────────────────────────
+const THEME_MODES = new Set(['system', 'dark', 'light']);
+let themeMode = document.documentElement.dataset.themeMode || 'system';
+const systemThemeQuery = window.matchMedia?.('(prefers-color-scheme: light)');
+
+function resolveThemeMode(mode) {
+  return mode === 'system'
+    ? (systemThemeQuery?.matches ? 'light' : 'dark')
+    : mode;
+}
+
+function applyThemeMode(mode = themeMode) {
+  if(!THEME_MODES.has(mode)) mode = 'system';
+  themeMode = mode;
+  document.documentElement.dataset.themeMode = mode;
+  document.documentElement.dataset.theme = resolveThemeMode(mode);
+  const select = document.getElementById('theme-select');
+  if(select) select.value = mode;
+}
+
+function setThemeMode(mode) {
+  if(!THEME_MODES.has(mode)) mode = 'system';
+  applyThemeMode(mode);
+  localStorage.setItem('themeMode', mode);
+  showToast(`Theme: ${mode === 'system' ? 'Match system' : mode[0].toUpperCase() + mode.slice(1)}`);
+}
+
+if(systemThemeQuery) {
+  systemThemeQuery.addEventListener('change', () => {
+    if(themeMode === 'system') applyThemeMode('system');
+  });
+}
+applyThemeMode(themeMode);
 
 // ── Font size control ────────────────────────────────────────────────────────
 let chatFontSize = parseInt(localStorage.getItem('chatFontSize') || '13', 10);
