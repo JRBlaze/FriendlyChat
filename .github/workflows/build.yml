@@ -27,7 +27,7 @@ jobs:
         include:
           - platform: Windows
             os: windows-latest
-            command: npx electron-builder --win --x64
+            command: npx electron-builder --win --x64 --publish never
             artifact: windows
             files: |
               dist/*.exe
@@ -35,7 +35,7 @@ jobs:
               dist/latest.yml
           - platform: macOS
             os: macos-latest
-            command: npx electron-builder --mac
+            command: npx electron-builder --mac --publish never
             artifact: macos
             files: |
               dist/*.dmg
@@ -43,7 +43,7 @@ jobs:
               dist/latest-mac.yml
           - platform: Linux
             os: ubuntu-latest
-            command: npx electron-builder --linux --x64
+            command: npx electron-builder --linux --x64 --publish never
             artifact: linux
             files: |
               dist/*.AppImage
