@@ -5,22 +5,57 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build or repair (for example, v1.2.9)
+        required: true
+        type: string
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+  cancel-in-progress: false
+
 jobs:
   build:
+    name: Build ${{ matrix.platform }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        include:
+          - platform: Windows
+            os: windows-latest
+            command: npx electron-builder --win --x64
+            artifact: windows
+            files: |
+              dist/*.exe
+              dist/*.exe.blockmap
+              dist/latest.yml
+          - platform: macOS
+            os: macos-latest
+            command: npx electron-builder --mac
+            artifact: macos
+            files: |
+              dist/*.dmg
+              dist/*.dmg.blockmap
+              dist/latest-mac.yml
+          - platform: Linux
+            os: ubuntu-latest
+            command: npx electron-builder --linux --x64
+            artifact: linux
+            files: |
+              dist/*.AppImage
+              dist/latest-linux.yml
 
     runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -28,33 +63,64 @@ jobs:
           node-version: 20
 
       - name: Install Linux dependencies
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.platform == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libnss3-dev libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2-dev
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
-      - name: Build and publish (Windows)
-        if: matrix.os == 'windows-latest'
-        run: npx electron-builder --win --x64 --publish always
+      - name: Build ${{ matrix.platform }}
+        run: ${{ matrix.command }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      - name: Build and publish (Mac)
-        if: matrix.os == 'macos-latest'
-        run: npx electron-builder --mac --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: false
+      - name: Upload ${{ matrix.platform }} installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+          retention-days: 7
 
-      - name: Build and publish (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: npx electron-builder --linux --x64 --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  release:
+    name: Publish release assets
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+
+    steps:
+      - name: Download all installers
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$(find release-assets -maxdepth 1 -type f -name '*.exe' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          find release-assets -maxdepth 1 -type f -printf '%f\n' | sort
+
+      - name: Create release if needed
+        shell: bash
+        run: |
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$RELEASE_TAG" \
+              --generate-notes
+          fi
+
+      - name: Upload all release assets
+        shell: bash
+        run: |
+          gh release upload "$RELEASE_TAG" release-assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
