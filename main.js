@@ -14,6 +14,57 @@ ipcMain.handle('kick-fetch-emotes', async (event, channel) => {
   try { return await fetchKickEmotesViaWindow(channel); } catch(e) { return null; }
 });
 
+ipcMain.handle('youtube-sign-in', async () => {
+  return openYouTubeSignInWindow();
+});
+
+function openYouTubeSignInWindow() {
+  return new Promise((resolve) => {
+    const win = new BrowserWindow({
+      width: 1100,
+      height: 800,
+      minWidth: 520,
+      minHeight: 600,
+      title: 'YouTube - Sign in',
+      autoHideMenuBar: true,
+      parent: mainWindow || undefined,
+      modal: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+      },
+    });
+
+    win.webContents.setWindowOpenHandler(({ url }) => {
+      if(isAllowedYouTubeSignInUrl(url)) return { action: 'allow' };
+      shell.openExternal(url);
+      return { action: 'deny' };
+    });
+
+    win.webContents.on('will-navigate', (event, url) => {
+      if(!isAllowedYouTubeSignInUrl(url)) event.preventDefault();
+    });
+
+    win.on('closed', () => resolve(true));
+    // This BrowserWindow shares the app's persistent default session with the
+    // embedded live chat, so signing in here also signs in the chat iframe.
+    win.loadURL('https://www.youtube.com/');
+  });
+}
+
+function isAllowedYouTubeSignInUrl(rawUrl) {
+  try {
+    const { protocol, hostname } = new URL(rawUrl);
+    if(protocol !== 'https:') return false;
+    return hostname === 'youtube.com'
+      || hostname.endsWith('.youtube.com')
+      || hostname === 'google.com'
+      || hostname.endsWith('.google.com');
+  } catch(_) {
+    return false;
+  }
+}
+
 function fetchKickEmotesViaWindow(channel) {
   return new Promise((resolve) => {
     const win = new BrowserWindow({
