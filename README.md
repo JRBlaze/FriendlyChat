@@ -15,6 +15,7 @@ Friendly Chat lets you watch and participate in Twitch and Kick chats in one pla
 - Filter by platform
 - Send messages to one or both platforms at once
 - Load recent chat history when you join a channel
+- Reopen recently joined Twitch and Kick channels from a local recent-chat cache
 - Emote support including BTTV, 7TV, and native platform emotes
 - Tab autocomplete for emotes (`:emote`) and mentions (`@username`)
 - Click a username to reply, timeout, ban, or delete messages
