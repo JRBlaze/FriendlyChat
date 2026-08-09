@@ -1,23 +1,24 @@
 # Friendly Chat
 
-A desktop app that merges live chat from Twitch and Kick into one unified window, with an optional embedded YouTube Live Chat panel. Built with Electron.
+A desktop app that merges live chat from Twitch, Kick and YouTube into one unified window. Built with Electron.
 
 ![Platform Support](https://img.shields.io/badge/platform-Windows%20%7C%20Mac%20%7C%20Linux-blue)
-![Version](https://img.shields.io/badge/version-1.3.1-green)
+![Version](https://img.shields.io/badge/version-1.4.0-green)
 
 ## What it does
 
-Friendly Chat lets you watch and participate in Twitch and Kick chats in one place.
+Friendly Chat lets you watch and participate in Twitch, Kick and YouTube chats in one place.
 
-- View Twitch + Kick chats in a single feed
-- Open YouTube Live Chat from a livestream URL without configuring a YouTube API or OAuth client
-- Sign in through the app's browser session and send messages from YouTube's own chat composer
-- Filter by platform
-- Send messages to one or both platforms at once
-- Load recent chat history when you join a channel
-- Reopen recently joined Twitch and Kick channels from a local recent-chat cache
-- Emote support including BTTV, 7TV, and native platform emotes
-- Tab autocomplete for emotes (`:emote`) and mentions (`@username`)
+- View Twitch, Kick and YouTube chat in a single merged feed
+- Join the same channel name on every platform at once with **Join all**
+- Open a YouTube live chat from a channel name or `@handle` — no need to hunt down the livestream URL
+- Filter the feed by platform
+- Send messages to Twitch and Kick at once (YouTube sends from its own panel)
+- Load recent chat history when you join a channel, with the original timestamps
+- Reopen recently joined channels from a local recent-chat list
+- Emotes from every source each platform supports: Twitch global/channel/sub/follower emotes, Kick global, emoji and channel emotes, YouTube emoji and channel member emotes, plus 7TV, BTTV and FrankerFaceZ
+- Sound and/or desktop notification when your name is mentioned, each toggled separately
+- Tab autocomplete for emotes (`:emote`) and mentions (`@username`), plus a searchable emote picker
 - Click a username to reply, timeout, ban, or delete messages
 - Adjustable font size that saves between sessions
 - Light, dark, and match-system theme modes
@@ -42,20 +43,57 @@ Then try opening the app again. Alternatively go to **System Settings → Privac
 
 1. Launch Friendly Chat
 2. Click **Accounts** and connect Twitch and/or Kick
-3. Type a channel name and click **Join**
-4. To use YouTube chat, click **YouTube Chat**, paste a livestream URL, and click **Load**
-5. Click **Sign in** in the YouTube panel, complete browser sign-in, and close that window
-6. Send YouTube messages from the composer inside the YouTube panel
+3. Type a channel name and click **Join**, or use the **ALL** box and **Join all** to open the same name on every platform at once
+4. For YouTube, type the channel name, its `@handle`, or a livestream URL — Friendly Chat finds whatever that channel is streaming right now
 
 You can watch and read chats without signing in. Signing in is only required to send messages.
 
-YouTube chat uses YouTube's official website embed and follows Friendly Chat's light, dark, or system theme. Browser sign-in and the embedded chat share the same persistent Electron session, so no YouTube API key or OAuth client is needed. It remains in a separate panel because browsers do not allow Friendly Chat to read or merge the contents of YouTube's cross-origin iframe. Use YouTube's composer in that panel to send messages; the shared message box and Friendly Chat moderation tools remain unavailable for YouTube.
+## Mention alerts
+
+Open **Settings** to choose what happens when someone says your name:
+
+- **Play a sound** — a short chime generated in the app, with a volume slider. No sound file to install.
+- **Show a desktop notification** — uses your operating system's notification centre.
+
+The two toggles are independent, so you can have sound only, notification only, both, or neither. Your connected Twitch and Kick account names are always highlighted; add any other names you go by in **Extra names to highlight**.
+
+Alerts are rate limited to one every 1.2 seconds, and channel history replayed on join never triggers them.
+
+## Performance
+
+**Settings → Performance** controls how many messages the feed keeps (200–5000, default 500). Older messages are dropped so a stream you leave open all day stays responsive. You can also turn off the message fade-in animation for the smoothest scrolling on very busy channels.
+
+## How YouTube works
+
+YouTube has no public chat API that works from a channel name alone, and a browser cannot read youtube.com directly because of cross-origin rules. Friendly Chat's local server does the work instead:
+
+1. It loads the channel's `/live` page to find the video that is streaming now.
+2. It reads the live chat page once for YouTube's own continuation token.
+3. It long-polls YouTube's live chat endpoint and hands normalized messages back to the app.
+
+No API key, OAuth client or third-party service is involved. Messages, author badges, Super Chats, memberships and custom channel emoji all render in the merged feed.
+
+The panel on the right still embeds YouTube's own chat widget. That is what you use to *send* YouTube messages: click **Sign in**, complete browser sign-in, and use the composer inside the panel. The shared message box remains Twitch and Kick only, because sending to YouTube would require a Google OAuth client.
+
+If YouTube changes its payloads or the stream ends, the merged feed says so and the panel keeps working on its own.
+
+## Development
+
+```
+npm install
+npm start      # run the app
+npm test       # run the full offline test suite
+```
+
+The test suite loads the real `friendly-chat.html` into jsdom with the network stubbed, then drives the app the way a user would: joining channels on all three platforms, rendering emotes from every source, filtering, sending, moderating, autocompleting, changing settings, and pushing thousands of messages through the feed to check it stays bounded. The server and YouTube parsers are covered separately. Nothing in the suite touches the network.
+
+Run one suite with `node tests/run.js <name>` (`youtube`, `server`, `render`, `app`, `perf`).
 
 ## Built with
 
 - [Electron](https://www.electronjs.org)
 - [Twitch IRC](https://dev.twitch.tv/docs/irc/)
 - [Kick Pusher WebSocket](https://kick.com)
-- [YouTube embedded Live Chat](https://support.google.com/youtube/answer/2524549)
-- [BTTV](https://betterttv.com) / [7TV](https://7tv.app) emotes
+- YouTube live chat (the same endpoint youtube.com's own chat page uses)
+- [BTTV](https://betterttv.com) / [7TV](https://7tv.app) / [FrankerFaceZ](https://www.frankerfacez.com) emotes
 - [recent-messages.robotty.de](https://recent-messages.robotty.de) for Twitch chat history
