@@ -137,18 +137,37 @@ function withHiddenWindow(url, extract, { timeoutMs = 12000, userAgent } = {}) {
   });
 }
 
-function fetchKickEmotesViaWindow(channel) {
+// Kick serves the same emote data from two paths and which one answers varies
+// with their Cloudflare rules, so both are tried. The hidden window uses the
+// app's own session, so a channel the user subscribes to returns its
+// subscriber emotes too.
+const KICK_EMOTE_ENDPOINTS = [
+  (slug) => `https://kick.com/emotes/${slug}`,
+  (slug) => `https://kick.com/api/v2/channels/${slug}/emotes`,
+];
+
+function looksLikeKickEmotePayload(value) {
+  if(Array.isArray(value)) return value.length > 0;
+  return !!(value && typeof value === 'object' && (value.data || value.emotes));
+}
+
+async function fetchKickEmotesViaWindow(channel) {
   const safeChannel = encodeURIComponent(String(channel || '').trim());
-  if(!safeChannel) return Promise.resolve(null);
-  return withHiddenWindow(
-    `https://kick.com/api/v2/channels/${safeChannel}/emotes`,
-    (win) => win.webContents.executeJavaScript('document.body.innerText')
-      .then(text => { try { return JSON.parse(text); } catch(e) { return null; } }),
-    {
-      timeoutMs: 10000,
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    }
-  );
+  if(!safeChannel) return null;
+
+  for(const build of KICK_EMOTE_ENDPOINTS) {
+    const payload = await withHiddenWindow(
+      build(safeChannel),
+      (win) => win.webContents.executeJavaScript('document.body.innerText')
+        .then(text => { try { return JSON.parse(text); } catch(e) { return null; } }),
+      {
+        timeoutMs: 10000,
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      }
+    );
+    if(looksLikeKickEmotePayload(payload)) return payload;
+  }
+  return null;
 }
 
 async function resolveYouTubeLiveViaWindow(query) {

@@ -1076,3 +1076,176 @@ describe('app: youtube panel and feed stay in sync', () => {
     assertEqual(a.api().S.channels.youtube, null);
   });
 });
+
+describe('app: kick emotes are available without being posted', () => {
+  const KICK_EMOTE_PAYLOAD = [
+    { id: 'emoji', name: 'Emoji', emotes: [{ id: 1, name: 'kickSmile' }] },
+    { id: 'Global', name: 'Global', emotes: [{ id: 2, name: 'kickGlobal' }] },
+    { id: 42, slug: 'kickstreamer', emotes: [
+      { id: 3, name: 'streamerHype', subscribers_only: true },
+      { id: 4, name: 'streamerLove', subscribers_only: true },
+    ] },
+  ];
+
+  it('fills the emote picker on join, before anyone posts an emote', async () => {
+    const a = await boot({ electronAPI: { fetchKickEmotes: async () => KICK_EMOTE_PAYLOAD } });
+    a.click('.skip-btn');
+    stubKick(a);
+    a.type('#ci-kick', 'kickstreamer');
+    a.click('#jb-kick');
+    await a.tick(5);
+
+    // No chat message has arrived at all at this point.
+    assertEqual(a.$$('#feed .msg').length, 0);
+
+    a.click('#emote-btn');
+    const names = a.$$('#emote-results .emote-grid-item').map(el => el.getAttribute('title')).sort();
+    assertEqual(names, ['kickGlobal', 'kickSmile', 'streamerHype', 'streamerLove']);
+    assertIncludes(a.$('#emote-results').textContent, 'Kick Channel (2)');
+    assertIncludes(a.$('#emote-results').textContent, 'Kick Global (1)');
+  });
+
+  it('makes subscriber emotes completable by name right away', async () => {
+    const a = await boot({ electronAPI: { fetchKickEmotes: async () => KICK_EMOTE_PAYLOAD } });
+    a.click('.skip-btn');
+    stubKick(a);
+    a.type('#ci-kick', 'kickstreamer');
+    a.click('#jb-kick');
+    await a.tick(5);
+
+    a.type('#send-input', ':streamer');
+    assertEqual(a.$$('#autocomplete-popup .ac-item').length, 2);
+    a.key('#send-input', 'Tab');
+    assertEqual(a.$('#send-input').value, 'streamerHype ');
+  });
+
+  it('retries once when Kick blocks the first request', async () => {
+    let calls = 0;
+    const a = await boot({
+      electronAPI: {
+        fetchKickEmotes: async () => { calls++; return calls === 1 ? null : KICK_EMOTE_PAYLOAD; },
+      },
+    });
+    a.click('.skip-btn');
+    stubKick(a);
+    a.fetch.route('/kick-emotes', () => a.fetch.json({ error: 'blocked' }, 403));
+    a.type('#ci-kick', 'kickstreamer');
+    a.click('#jb-kick');
+    await a.wait(1400);
+    assert(calls >= 2, `expected a retry, saw ${calls} attempt(s)`);
+    assert(a.api().S.nativeEmotes.kick.kickGlobal, 'the retry should have loaded emotes');
+  });
+
+  it('restores global emotes at startup with no channel joined', async () => {
+    const first = await boot({ electronAPI: { fetchKickEmotes: async () => KICK_EMOTE_PAYLOAD } });
+    first.click('.skip-btn');
+    stubKick(first);
+    first.type('#ci-kick', 'kickstreamer');
+    first.click('#jb-kick');
+    await first.tick(5);
+    const stored = first.window.localStorage.getItem('kick_emotes_cache_v2');
+    assert(stored, 'emotes should have been cached');
+
+    // A fresh launch: nothing joined, no network.
+    const b = await boot({ storage: { kick_emotes_cache_v2: stored } });
+    b.click('.skip-btn');
+    assertEqual(b.api().S.channels.kick, null);
+    assert(b.api().S.nativeEmotes.kick.kickGlobal, 'global emotes should be back');
+    assert(b.api().S.nativeEmotes.kick.kickSmile, 'emoji should be back');
+    assert(!b.api().S.nativeEmotes.kick.streamerHype, 'channel emotes must not leak between channels');
+
+    assert(!b.$('#emote-btn').disabled, 'the picker must be reachable');
+    b.click('#emote-btn');
+    assertEqual(b.$('#emote-count').textContent, '2');
+  });
+
+  it('keeps channel emotes separated per channel in the cache', async () => {
+    const a = await boot();
+    a.click('.skip-btn');
+    const S = a.api().S;
+    S.nativeEmotes.kick = {
+      kickGlobal: { url: 'https://x/g.png', source: 'Kick Global' },
+      aOnly: { url: 'https://x/a.png', source: 'Kick Channel' },
+    };
+    a.window.eval(`cacheKickEmotes('channel-a')`);
+    S.nativeEmotes.kick = {
+      kickGlobal: { url: 'https://x/g.png', source: 'Kick Global' },
+      bOnly: { url: 'https://x/b.png', source: 'Kick Channel' },
+    };
+    a.window.eval(`cacheKickEmotes('channel-b')`);
+
+    const cache = JSON.parse(a.window.localStorage.getItem('kick_emotes_cache_v2'));
+    assertEqual(Object.keys(cache.global.emotes), ['kickGlobal']);
+    assertEqual(Object.keys(cache.channels['channel-a'].emotes), ['aOnly']);
+    assertEqual(Object.keys(cache.channels['channel-b'].emotes), ['bOnly']);
+  });
+
+  it('does not file passively collected emotes as global', async () => {
+    const a = await boot();
+    a.click('.skip-btn');
+    stubKick(a);
+    a.fetch.route('/kick-emotes', () => a.fetch.json({ error: 'blocked' }, 403));
+    a.type('#ci-kick', 'kickstreamer');
+    a.click('#jb-kick');
+    await a.tick(4);
+    const ws = a.ws.byUrl('pusher.com').pop();
+    ws.emit(JSON.stringify({ event: 'pusher:connection_established', data: '{}' }));
+    await a.tick(2);
+    ws.emit(JSON.stringify({
+      event: 'App\\Events\\ChatMessageEvent',
+      data: JSON.stringify({ id: 'k3', content: 'hi [emote:900:seenInChat]', sender: { id: 1, username: 'Fan' } }),
+    }));
+    assertEqual(a.api().S.nativeEmotes.kick.seenInChat.source, 'Kick Channel');
+    const cache = JSON.parse(a.window.localStorage.getItem('kick_emotes_cache_v2'));
+    assertEqual(cache.global, null);
+    assert(cache.channels.kickstreamer.emotes.seenInChat, 'it belongs to this channel only');
+  });
+
+  it('warms the cache from the most recent channel when globals expired', async () => {
+    let asked = null;
+    const a = await boot({
+      storage: {
+        recent_chat_channels_v1: JSON.stringify({ kick: [{ name: 'lastchannel', lastOpened: Date.now() }] }),
+      },
+      electronAPI: {
+        fetchKickEmotes: async (channel) => { asked = channel; return KICK_EMOTE_PAYLOAD; },
+      },
+    });
+    await a.tick(4);
+    assertEqual(asked, 'lastchannel');
+    assert(a.api().S.nativeEmotes.kick.kickGlobal, 'globals should be warmed in the background');
+  });
+
+  it('says so in the feed when the emote list cannot be loaded', async () => {
+    const a = await boot();
+    a.click('.skip-btn');
+    stubKick(a);
+    a.fetch.route('/kick-emotes', () => a.fetch.json({ error: 'blocked' }, 403));
+    a.type('#ci-kick', 'kickstreamer');
+    a.click('#jb-kick');
+    await a.wait(3600);
+    a.flush();
+    assertIncludes(a.$('#feed').textContent, 'could not load the channel emote list');
+  });
+});
+
+describe('app: version display', () => {
+  it('shows the version from /config in the top bar and settings', async () => {
+    const a = await boot({
+      config: { twitch: { client_id: 'x' }, kick: { client_id: 'y' }, has_kick: true, version: '9.9.9' },
+    });
+    await a.tick(2);
+    assertEqual(a.$('#app-version').textContent, 'v9.9.9');
+    a.click('.skip-btn');
+    a.click('#settings-btn');
+    assertEqual(a.$('#settings-version').textContent, 'Friendly Chat v9.9.9');
+  });
+
+  it('hides the badge when the server does not report a version', async () => {
+    const a = await boot({
+      config: { twitch: { client_id: 'x' }, kick: { client_id: 'y' }, has_kick: true },
+    });
+    await a.tick(2);
+    assertEqual(a.$('#app-version').textContent, '');
+  });
+});

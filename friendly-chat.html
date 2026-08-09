@@ -139,6 +139,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .topbar{background:var(--surface);border-bottom:1px solid var(--border);display:flex;flex-direction:column;padding:8px 14px;gap:8px;flex-shrink:0;}
 .topbar-row{display:flex;align-items:center;gap:10px;min-width:0;flex-wrap:wrap;}
 .app-logo{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;letter-spacing:0.06em;display:flex;align-items:center;gap:8px;flex-shrink:0;}
+.app-version{font-size:10px;font-weight:600;letter-spacing:0.04em;color:var(--text-dim);background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:2px 7px;}
+.app-version:empty{display:none;}
 .ch-inputs{display:flex;gap:7px;flex:1;min-width:0;flex-wrap:wrap;}
 .ch-wrap{flex:1 1 220px;}
 /* Multi-platform join: one name, joined everywhere it exists */
@@ -371,7 +373,8 @@ html[data-animations="off"] .msg,html[data-animations="off"] .sys-msg{animation:
 .setting-row input:focus{border-color:var(--border2);}
 .settings-btn{padding:6px 14px;border-radius:7px;border:1px solid var(--border2);background:var(--surface2);color:var(--text-muted);font-size:12px;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;}
 .settings-btn:hover{border-color:var(--accent);color:var(--text);}
-.settings-footer{padding:14px 24px 20px;display:flex;justify-content:flex-end;gap:10px;}
+.settings-footer{padding:14px 24px 20px;display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.settings-version{font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text-dim);}
 .settings-status{font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text-dim);margin-top:8px;line-height:1.5;}
 .settings-status.warn{color:#ffb400;}
 .icon-btn{display:flex;align-items:center;gap:7px;padding:6px 12px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);cursor:pointer;font-size:12px;font-family:'DM Sans',sans-serif;color:var(--text-muted);transition:all 0.15s;flex-shrink:0;}
@@ -444,7 +447,7 @@ html[data-animations="off"] .msg,html[data-animations="off"] .sys-msg{animation:
 <div id="main-app" class="hidden">
   <div class="topbar">
     <div class="topbar-row">
-      <div class="app-logo"><span>FRIENDLY CHAT</span></div>
+      <div class="app-logo"><span>FRIENDLY CHAT</span><span class="app-version" id="app-version" title="Installed version"></span></div>
       <div class="multi-join" id="multi-join">
         <span class="plat-tag">ALL</span>
         <input type="text" id="ci-all" placeholder="same channel name on every platform" autocomplete="off" />
@@ -614,6 +617,7 @@ html[data-animations="off"] .msg,html[data-animations="off"] .sys-msg{animation:
     </div>
 
     <div class="settings-footer">
+      <span class="settings-version" id="settings-version">Friendly Chat</span>
       <button class="continue-btn" id="settings-close">Done</button>
     </div>
   </div>
@@ -637,6 +641,7 @@ async function loadConfig(retries = 5, delayMs = 800) {
       const c = await r.json();
       TWITCH_CLIENT_ID   = c.twitch?.client_id  || '';
       KICK_CLIENT_ID_PUB = c.kick?.client_id    || '';
+      setAppVersion(c.version);
       dbg('config', 'Loaded /config successfully', {
         hasKickClientId: !!KICK_CLIENT_ID_PUB,
         hasTwitchClientId: !!TWITCH_CLIENT_ID
@@ -654,6 +659,20 @@ async function loadConfig(retries = 5, delayMs = 800) {
   }
 }
 
+
+// The version comes from package.json via /config, so there is only ever one
+// place to bump it.
+let APP_VERSION = '';
+
+function setAppVersion(version) {
+  APP_VERSION = String(version || '').trim();
+  const el = document.getElementById('app-version');
+  if(el) el.textContent = APP_VERSION ? `v${APP_VERSION}` : '';
+  const settingsVersion = document.getElementById('settings-version');
+  if(settingsVersion) {
+    settingsVersion.textContent = APP_VERSION ? `Friendly Chat v${APP_VERSION}` : 'Friendly Chat';
+  }
+}
 
 const CFG = {
   twitch: {
@@ -706,9 +725,11 @@ const S = {
   canModerate: { twitch: false, kick: false, youtube: false },
 };
 
-const KICK_EMOTE_CACHE_KEY = 'kick_emotes_cache_v1';
+const KICK_EMOTE_CACHE_KEY = 'kick_emotes_cache_v2';
 const KICK_EMOTE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const KICK_EMOTE_CACHE_CHANNEL_LIMIT = 8;
+const KICK_EMOTE_FETCH_RETRIES = 2;
+const KICK_EMOTE_RETRY_DELAY_MS = 1000;
 const RECENT_CHANNELS_CACHE_KEY = 'recent_chat_channels_v1';
 const RECENT_CHANNELS_LIMIT = 12;
 const TWITCH_HISTORY_LIMIT = 100;
@@ -927,50 +948,101 @@ function normalizeChannelFor(platform, name) {
   return platform === 'youtube' ? String(name || '').trim() : normalizeChannelName(name);
 }
 
+// Kick's emote cache is split in two: the global and emoji sets are the same
+// everywhere, so they are stored once and restored at startup — that is what
+// makes Kick's standard emotes usable before any channel has been joined.
+// Channel sets are stored per channel.
 function getKickEmoteCache() {
   try {
-    return JSON.parse(localStorage.getItem(KICK_EMOTE_CACHE_KEY) || '{}') || {};
+    const parsed = JSON.parse(localStorage.getItem(KICK_EMOTE_CACHE_KEY) || '{}') || {};
+    return {
+      global: parsed.global && typeof parsed.global === 'object' ? parsed.global : null,
+      channels: parsed.channels && typeof parsed.channels === 'object' ? parsed.channels : {},
+    };
   } catch(_) {
-    return {};
+    return { global: null, channels: {} };
   }
 }
 
 function saveKickEmoteCache(cache) {
   try {
-    localStorage.setItem(KICK_EMOTE_CACHE_KEY, JSON.stringify(cache || {}));
+    localStorage.setItem(KICK_EMOTE_CACHE_KEY, JSON.stringify(cache || { global: null, channels: {} }));
   } catch(_) {}
+}
+
+function kickCacheIsFresh(record) {
+  return !!(record?.ts && record.emotes && Date.now() - record.ts <= KICK_EMOTE_CACHE_TTL_MS);
+}
+
+// Emotes that are not channel specific keep working across channels, so they
+// are separated out by the source label the parser assigned.
+function splitKickEmotes(store) {
+  const global = {};
+  const channel = {};
+  Object.entries(store || {}).forEach(([name, emote]) => {
+    if(emote?.source === 'Kick Channel') channel[name] = emote;
+    else global[name] = emote;
+  });
+  return { global, channel };
+}
+
+// Restores Kick's global and emoji emotes at startup so the picker and
+// autocomplete are useful straight away, with no channel joined.
+function loadKickGlobalEmotes() {
+  const cache = getKickEmoteCache();
+  if(!kickCacheIsFresh(cache.global)) return 0;
+  S.nativeEmotes.kick = { ...cache.global.emotes, ...S.nativeEmotes.kick };
+  return Object.keys(cache.global.emotes).length;
 }
 
 function loadKickCachedEmotes(channel) {
   const cache = getKickEmoteCache();
   const key = normalizeChannelName(channel);
-  const rec = cache[key];
-  if(!rec || !rec.ts || !rec.emotes) return false;
-  if(Date.now() - rec.ts > KICK_EMOTE_CACHE_TTL_MS) {
-    delete cache[key];
-    saveKickEmoteCache(cache);
-    return false;
+  let restored = 0;
+
+  if(kickCacheIsFresh(cache.global)) {
+    S.nativeEmotes.kick = { ...cache.global.emotes, ...S.nativeEmotes.kick };
+    restored += Object.keys(cache.global.emotes).length;
   }
-  S.nativeEmotes.kick = { ...rec.emotes, ...S.nativeEmotes.kick };
-  return Object.keys(rec.emotes).length > 0;
+
+  const rec = cache.channels[key];
+  if(rec && !kickCacheIsFresh(rec)) {
+    delete cache.channels[key];
+    saveKickEmoteCache(cache);
+  } else if(kickCacheIsFresh(rec)) {
+    S.nativeEmotes.kick = { ...rec.emotes, ...S.nativeEmotes.kick };
+    restored += Object.keys(rec.emotes).length;
+  }
+
+  return restored;
 }
 
-function cacheKickEmotes(channel) {
+function cacheKickEmotes(channel, store = null) {
   const key = normalizeChannelName(channel);
-  if(!key) return;
+  const { global, channel: channelEmotes } = splitKickEmotes(store || S.nativeEmotes.kick);
   const cache = getKickEmoteCache();
-  cache[key] = { ts: Date.now(), emotes: S.nativeEmotes.kick || {} };
-  // Keep the cache bounded so localStorage never fills up with channels the
-  // user visited once months ago. The channel just written always survives:
-  // several channels joined in the same millisecond share a timestamp, and a
-  // plain sort would then be free to evict the newest entry.
-  const keys = [key, ...Object.keys(cache)
-    .filter(k => k !== key)
-    .sort((a, b) => (cache[b]?.ts || 0) - (cache[a]?.ts || 0))]
-    .slice(0, KICK_EMOTE_CACHE_CHANNEL_LIMIT);
-  const pruned = {};
-  keys.forEach(k => { pruned[k] = cache[k]; });
-  saveKickEmoteCache(pruned);
+  const now = Date.now();
+
+  if(Object.keys(global).length) {
+    cache.global = { ts: now, emotes: { ...(cache.global?.emotes || {}), ...global } };
+  }
+
+  if(key && Object.keys(channelEmotes).length) {
+    cache.channels[key] = { ts: now, emotes: channelEmotes };
+    // Keep the cache bounded so localStorage never fills up with channels the
+    // user visited once months ago. The channel just written always survives:
+    // several channels joined in the same millisecond share a timestamp, and a
+    // plain sort would then be free to evict the newest entry.
+    const keys = [key, ...Object.keys(cache.channels)
+      .filter(k => k !== key)
+      .sort((a, b) => (cache.channels[b]?.ts || 0) - (cache.channels[a]?.ts || 0))]
+      .slice(0, KICK_EMOTE_CACHE_CHANNEL_LIMIT);
+    const pruned = {};
+    keys.forEach(k => { pruned[k] = cache.channels[k]; });
+    cache.channels = pruned;
+  }
+
+  saveKickEmoteCache(cache);
 }
 
 function setCanModerate(platform, canModerate) {
@@ -1462,8 +1534,12 @@ function refreshTargets() {
   sendInput.disabled = !any;
   document.getElementById('send-btn').disabled = !any;
   const anyChannel = ALL_PLATFORMS.some(p => S.channels[p]);
+  // Kick's global emotes are restored from cache before any channel is joined,
+  // so the picker must be reachable whenever emotes exist at all.
+  const hasEmotes = ALL_PLATFORMS.some(p =>
+    Object.keys(S.nativeEmotes[p] || {}).length || Object.keys(S.thirdPartyEmotes[p] || {}).length);
   const emoteBtn = document.getElementById('emote-btn');
-  emoteBtn.disabled = !anyChannel;
+  emoteBtn.disabled = !anyChannel && !hasEmotes;
   sendInput.placeholder = any ? 'Type a message...' : 'Connect an account to send messages...';
   SEND_PLATFORMS.forEach(p => {
     document.getElementById(`tc-${p}`).classList.toggle('locked', !S.auth[p]);
@@ -1955,6 +2031,7 @@ document.getElementById('fs-input').addEventListener('keydown', e => {
 syncMultiJoinPills();
 syncFilterChips();
 renderRecentChannelMenus();
+warmKickEmoteCache();
 
 function toggleFilterAll() {
   const all = ALL_PLATFORMS.every(p => S.filter.has(p));
@@ -2596,9 +2673,11 @@ function connectKick(channel, reconnectAttempt = 0) {
       );
       setCanModerate('kick', canKickMod);
 
-      // Fetch Kick native emotes (browser-side, bypasses Cloudflare) + 7TV/BTTV
-      if(loadKickCachedEmotes(channel)) {
-        addSys(`Loaded cached Kick emotes (${Object.keys(S.nativeEmotes.kick).length})`);
+      // Show the cached list instantly, then refresh it from Kick.
+      const cached = loadKickCachedEmotes(channel);
+      if(cached > 0) {
+        addSys(`Loaded ${Object.keys(S.nativeEmotes.kick).length} cached Kick emotes`);
+        refreshEmotePickerIfOpen();
       }
       fetchKickNativeEmotes(channel);
       fetchThirdPartyEmotes('kick', channel, null);
@@ -2676,7 +2755,9 @@ function connectKick(channel, reconnectAttempt = 0) {
             if(e.id && e.name && !S.nativeEmotes.kick[e.name]) {
               S.nativeEmotes.kick[e.name] = {
                 url: `https://files.kick.com/emotes/${e.id}/fullsize`,
-                source: 'Kick'
+                // Filed as a channel emote: an emote seen in one channel's chat
+                // must not leak into the shared global cache.
+                source: 'Kick Channel'
               };
               kickEmotesUpdated = true;
             }
@@ -2689,7 +2770,7 @@ function connectKick(channel, reconnectAttempt = 0) {
           if(!S.nativeEmotes.kick[name]) {
             S.nativeEmotes.kick[name] = {
               url: `https://files.kick.com/emotes/${id}/fullsize`,
-              source: 'Kick'
+              source: 'Kick Channel'
             };
             kickEmotesUpdated = true;
           }
@@ -2847,10 +2928,12 @@ function addTwitchEmote(e, fallbackSource) {
 
 // Refresh the emote picker popup in place if the user has it open, so newly
 // loaded emotes show up immediately instead of after a close/reopen.
+// Called whenever an emote store changes: re-renders an open picker in place
+// (keeping the search box's text and focus) and re-enables the picker button.
 function refreshEmotePickerIfOpen() {
+  refreshTargets();
   const popup = document.getElementById('autocomplete-popup');
   if(!popup || !popup.classList.contains('visible') || popup.dataset.mode !== 'browse') return;
-  // Re-render in place so the search box keeps its text and focus.
   AC.allEmotes = allEmoteEntries();
   renderEmotePickerBody(document.getElementById('emote-search')?.value || '');
 }
@@ -3024,42 +3107,85 @@ function parseKickEmotePayload(data) {
   return store;
 }
 
-async function fetchKickNativeEmotes(channel) {
-  let data = null;
-
-  // Use the Electron IPC bridge if available (running inside Electron): a real
-  // browser window gets past Cloudflare where a plain fetch does not.
+// Asks for a channel's full emote list once, through whichever route is
+// available. Returns the raw payload or null.
+async function requestKickEmotePayload(channel) {
+  // Inside Electron a real (hidden) browser window is the most reliable route:
+  // it carries the app's session cookies and gets past Cloudflare, which a
+  // plain fetch does not.
   if(window.electronAPI?.fetchKickEmotes) {
     try {
-      data = await window.electronAPI.fetchKickEmotes(channel);
+      const data = await window.electronAPI.fetchKickEmotes(channel);
+      if(data) return data;
     } catch(e) {
       console.warn('Kick IPC emote fetch failed:', e.message);
     }
   }
 
   // Browser mode (or a failed IPC call): let the local server try.
-  if(!data) {
-    try {
-      const res = await fetch(`/kick-emotes?channel=${encodeURIComponent(channel)}`);
-      if(res.ok) {
-        const payload = await res.json();
-        data = payload?.data ?? null;
-      }
-    } catch(e) {
-      dbg('kick', 'Server emote fallback failed', e.message);
+  try {
+    const res = await fetch(`/kick-emotes?channel=${encodeURIComponent(channel)}`);
+    if(res.ok) {
+      const payload = await res.json();
+      return payload?.data ?? null;
     }
+    dbg('kick', 'Server emote fallback returned', res.status);
+  } catch(e) {
+    dbg('kick', 'Server emote fallback failed', e.message);
   }
 
+  return null;
+}
+
+// Loads every emote Kick exposes for a channel — the global set, the emoji set
+// and the channel's own (including subscriber) emotes — so they are all usable
+// immediately instead of only appearing once somebody posts them.
+async function fetchKickNativeEmotes(channel, { quiet = false, attempt = 0 } = {}) {
+  const data = await requestKickEmotePayload(channel);
   const store = parseKickEmotePayload(data);
-  if(Object.keys(store).length > 0) {
-    // Live-collected emotes win so nothing already rendering breaks.
+  const count = Object.keys(store).length;
+
+  if(count > 0) {
+    // Anything already collected wins so nothing on screen changes underneath.
     S.nativeEmotes.kick = { ...store, ...S.nativeEmotes.kick };
-    if(S.channels.kick === channel) cacheKickEmotes(channel);
-    addSys(`Loaded ${Object.keys(S.nativeEmotes.kick).length} Kick emotes`);
+    cacheKickEmotes(channel, store);
+    if(!quiet) {
+      const { global, channel: channelEmotes } = splitKickEmotes(store);
+      addSys(`Loaded ${count} Kick emotes (${Object.keys(channelEmotes).length} channel, ${Object.keys(global).length} global)`);
+    }
     refreshEmotePickerIfOpen();
+    return count;
+  }
+
+  // Cloudflare occasionally rejects the very first request from a cold window.
+  // A couple of spaced retries cost little and usually succeed.
+  if(attempt < KICK_EMOTE_FETCH_RETRIES) {
+    await new Promise(res => setTimeout(res, KICK_EMOTE_RETRY_DELAY_MS * (attempt + 1)));
+    if(S.channels.kick !== channel && !quiet) return 0;
+    return fetchKickNativeEmotes(channel, { quiet, attempt: attempt + 1 });
+  }
+
+  if(!quiet) {
+    addSys('Kick: could not load the channel emote list — emotes will appear as they are used');
+  }
+  return 0;
+}
+
+// At startup, put Kick's global and emoji emotes back on screen from cache, and
+// quietly refresh them from the most recent channel when they have expired.
+// Without this the standard Kick emotes would be missing until a channel is
+// joined, even though they never change.
+function warmKickEmoteCache() {
+  const restored = loadKickGlobalEmotes();
+  if(restored > 0) {
+    dbg('kick', 'Restored cached global emotes', { count: restored });
     return;
   }
-  console.log('Kick: emotes will collect passively from chat messages');
+  const recent = (loadRecentChannelCache().kick || [])
+    .map(item => normalizeChannelName(item?.name || item))
+    .filter(Boolean)[0];
+  if(!recent) return;
+  fetchKickNativeEmotes(recent, { quiet: true }).catch(() => {});
 }
 
 // ── Third-party emote fetching (7TV + BTTV) ──────────────────────────────────

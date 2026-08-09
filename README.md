@@ -17,6 +17,7 @@ Friendly Chat lets you watch and participate in Twitch, Kick and YouTube chats i
 - Load recent chat history when you join a channel, with the original timestamps
 - Reopen recently joined channels from a local recent-chat list
 - Emotes from every source each platform supports: Twitch global/channel/sub/follower emotes, Kick global, emoji and channel emotes, YouTube emoji and channel member emotes, plus 7TV, BTTV and FrankerFaceZ
+- Kick's full emote list loads the moment you join, and its global set is cached so it is there before you join anything
 - Sound and/or desktop notification when your name is mentioned, each toggled separately
 - Tab autocomplete for emotes (`:emote`) and mentions (`@username`), plus a searchable emote picker
 - Click a username to reply, timeout, ban, or delete messages
@@ -58,6 +59,12 @@ Open **Settings** to choose what happens when someone says your name:
 The two toggles are independent, so you can have sound only, notification only, both, or neither. Your connected Twitch and Kick account names are always highlighted; add any other names you go by in **Extra names to highlight**.
 
 Alerts are rate limited to one every 1.2 seconds, and channel history replayed on join never triggers them.
+
+## Emotes
+
+Every emote a platform exposes is fetched up front when you join, so the picker and `:name` autocomplete are complete immediately — nothing waits for somebody to post an emote first.
+
+Kick needs a little care because its emote endpoint sits behind Cloudflare. Friendly Chat asks for it through a hidden Electron window that carries the app's own session (so a channel you subscribe to returns its subscriber emotes), falls back to the local server in browser mode, tries both of Kick's emote paths, and retries a couple of times if the first request is turned away. Kick's global and emoji sets are cached separately from channel sets, so they are restored at startup with no channel joined. Collecting emotes from live messages still exists, but only as a last resort.
 
 ## Performance
 
