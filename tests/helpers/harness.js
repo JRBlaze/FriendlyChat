@@ -218,6 +218,8 @@ async function launchApp({ storage = {}, electronAPI = null, config = null, rout
     // Drains the render queue so assertions see the DOM immediately.
     flush: () => api().flushFeed(),
     tick: (n = 1) => tick(window, n),
+    // Real-time wait, for behaviour that genuinely sleeps (retry backoff).
+    wait: (ms) => new Promise(resolve => window.setTimeout(resolve, ms)),
     click(sel) {
       const el = window.document.querySelector(sel);
       if (!el) throw new Error(`click: no element for ${sel}`);

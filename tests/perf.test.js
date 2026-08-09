@@ -126,9 +126,10 @@ describe('perf: storage stays bounded', () => {
       S.nativeEmotes.kick = { [`emote${i}`]: { url: 'https://x/e.png', source: 'Kick Channel' } };
       a.window.eval(`cacheKickEmotes('channel${i}')`);
     }
-    const cache = JSON.parse(a.window.localStorage.getItem('kick_emotes_cache_v1'));
-    assert(Object.keys(cache).length <= 8, `kick emote cache holds ${Object.keys(cache).length} channels`);
-    assert(cache.channel19, 'the newest channel must be kept');
+    const cache = JSON.parse(a.window.localStorage.getItem('kick_emotes_cache_v2'));
+    const channels = Object.keys(cache.channels);
+    assert(channels.length <= 8, `kick emote cache holds ${channels.length} channels`);
+    assert(cache.channels.channel19, 'the newest channel must be kept');
   });
 
   it('caps the recent-channel list', async () => {

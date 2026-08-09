@@ -10,6 +10,7 @@ const path = require('path');
 
 const SUITES = [
   'youtube.test.js',
+  'updater.test.js',
   'server.test.js',
   'render.test.js',
   'app.test.js',

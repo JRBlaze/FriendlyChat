@@ -10,6 +10,11 @@ const http = require('http');
 const fs   = require('fs');
 const path = require('path');
 const yt   = require('./youtube');
+const updater = require('./updater');
+
+// Single source of truth for the version the app shows in its title bar.
+let APP_VERSION = '';
+try { APP_VERSION = require('./package.json').version || ''; } catch(_) {}
 
 // Only asset types the renderer actually loads are served. JSON is absent on
 // purpose: config.json is exposed through /config with just its public fields,
@@ -70,6 +75,10 @@ function start(CFG = {}) {
 
   const staticCache = new Map();
 
+  // Latest-release lookups, keyed by version+platform+arch.
+  const updateCache = new Map();
+  const UPDATE_CACHE_TTL_MS = 15 * 60 * 1000;
+
   // videoId -> { apiKey, clientVersion, visitorData, continuation, ts }
   // Bootstrapping the live chat page is expensive, so the InnerTube handshake is
   // reused for every poll of the same video.
@@ -119,6 +128,7 @@ function start(CFG = {}) {
         kick:     { client_id: kickClientId },
         has_kick: HAS_KICK,
         port:     PORT,
+        version:  APP_VERSION,
       });
       return;
     }
@@ -259,19 +269,34 @@ function start(CFG = {}) {
     if(pathname === '/kick-emotes' && req.method === 'GET') {
       const channel = (requestUrl.searchParams.get('channel') || '').trim();
       if(!channel) { sendJson(400, { error: 'channel is required' }); return; }
-      try {
-        const emoteRes = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(channel)}/emotes`, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            'Accept': 'application/json',
-          },
-        });
-        if(!emoteRes.ok) { sendJson(emoteRes.status, { error: `Kick returned HTTP ${emoteRes.status}` }); return; }
-        const data = await emoteRes.json();
-        sendJson(200, { data });
-      } catch(e) {
-        sendJson(502, { error: e.message });
+
+      const slug = encodeURIComponent(channel);
+      const endpoints = [
+        `https://kick.com/emotes/${slug}`,
+        `https://kick.com/api/v2/channels/${slug}/emotes`,
+      ];
+      let lastStatus = 0;
+      let lastError = '';
+
+      for(const endpoint of endpoints) {
+        try {
+          const emoteRes = await fetch(endpoint, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+              'Accept': 'application/json',
+              'Accept-Language': 'en-US,en;q=0.9',
+            },
+          });
+          if(!emoteRes.ok) { lastStatus = emoteRes.status; continue; }
+          const data = await emoteRes.json();
+          if(data) { sendJson(200, { data }); return; }
+        } catch(e) {
+          lastError = e.message;
+        }
       }
+
+      if(lastStatus) sendJson(lastStatus, { error: `Kick returned HTTP ${lastStatus}` });
+      else sendJson(502, { error: lastError || 'Kick emote lookup failed' });
       return;
     }
 
@@ -330,6 +355,32 @@ function start(CFG = {}) {
         });
       } catch(e) {
         sendJson(502, { error: e.message });
+      }
+      return;
+    }
+
+    // ── /update-check — is there a newer GitHub release? ─────────────────────
+    if(pathname === '/update-check' && req.method === 'GET') {
+      const currentVersion = requestUrl.searchParams.get('current') || APP_VERSION;
+      const platform = requestUrl.searchParams.get('platform') || process.platform;
+      const arch     = requestUrl.searchParams.get('arch') || process.arch;
+      const force    = requestUrl.searchParams.get('force') === '1';
+      const cacheKey = `${currentVersion}|${platform}|${arch}`;
+
+      // GitHub allows 60 unauthenticated calls an hour per IP, so a repeated
+      // check inside the cache window reuses the last answer.
+      const cached = updateCache.get(cacheKey);
+      if(!force && cached && Date.now() - cached.ts < UPDATE_CACHE_TTL_MS) {
+        sendJson(200, { ...cached.info, cached: true });
+        return;
+      }
+
+      try {
+        const info = await updater.checkForUpdate({ currentVersion, platform, arch });
+        updateCache.set(cacheKey, { ts: Date.now(), info });
+        sendJson(200, { ...info, cached: false });
+      } catch(e) {
+        sendJson(502, { error: e.message, releaseUrl: updater.RELEASES_PAGE });
       }
       return;
     }

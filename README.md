@@ -3,7 +3,7 @@
 A desktop app that merges live chat from Twitch, Kick and YouTube into one unified window. Built with Electron.
 
 ![Platform Support](https://img.shields.io/badge/platform-Windows%20%7C%20Mac%20%7C%20Linux-blue)
-![Version](https://img.shields.io/badge/version-1.4.0-green)
+![Version](https://img.shields.io/badge/version-1.4.1-green)
 
 ## What it does
 
@@ -17,11 +17,13 @@ Friendly Chat lets you watch and participate in Twitch, Kick and YouTube chats i
 - Load recent chat history when you join a channel, with the original timestamps
 - Reopen recently joined channels from a local recent-chat list
 - Emotes from every source each platform supports: Twitch global/channel/sub/follower emotes, Kick global, emoji and channel emotes, YouTube emoji and channel member emotes, plus 7TV, BTTV and FrankerFaceZ
+- Kick's full emote list loads the moment you join, and its global set is cached so it is there before you join anything
 - Sound and/or desktop notification when your name is mentioned, each toggled separately
 - Tab autocomplete for emotes (`:emote`) and mentions (`@username`), plus a searchable emote picker
 - Click a username to reply, timeout, ban, or delete messages
 - Adjustable font size that saves between sessions
 - Light, dark, and match-system theme modes
+- Tells you when a new release is on GitHub and installs it for you
 
 ![App Screenshot](FCScreenshot.png)
 
@@ -59,6 +61,24 @@ The two toggles are independent, so you can have sound only, notification only, 
 
 Alerts are rate limited to one every 1.2 seconds, and channel history replayed on join never triggers them.
 
+## Emotes
+
+Every emote a platform exposes is fetched up front when you join, so the picker and `:name` autocomplete are complete immediately — nothing waits for somebody to post an emote first.
+
+Kick needs a little care because its emote endpoint sits behind Cloudflare. Friendly Chat asks for it through a hidden Electron window that carries the app's own session (so a channel you subscribe to returns its subscriber emotes), falls back to the local server in browser mode, tries both of Kick's emote paths, and retries a couple of times if the first request is turned away. Kick's global and emoji sets are cached separately from channel sets, so they are restored at startup with no channel joined. Collecting emotes from live messages still exists, but only as a last resort.
+
+## Updates
+
+Friendly Chat checks GitHub for a newer release on launch and every six hours. When one exists, a banner appears at the top of the window with the version, the release notes behind a **What's new** toggle, and one button that does the work:
+
+- **Windows** — downloads the installer with a progress bar and launches it, then closes the app so the installer can replace it.
+- **macOS** — downloads the `.dmg` and opens it, ready for you to drag Friendly Chat into Applications.
+- **Linux** — downloads the new `.AppImage`, makes it executable and opens the folder containing it.
+
+Nothing downloads or installs on its own; the banner just gets you there in two clicks. **Later** hides the banner until the next check, **Skip this version** silences that particular release for good, and **Settings → Updates** has a manual *Check for updates now*, a toggle to stop checking automatically, and a way to clear a skipped version.
+
+The app deliberately does not use electron-updater. Its silent self-update needs a code-signed application, and the macOS builds here are unsigned, so it would work on two platforms out of three and fail confusingly on the third. Downloading the installer and handing it to the operating system behaves identically everywhere and adds no runtime dependency.
+
 ## Performance
 
 **Settings → Performance** controls how many messages the feed keeps (200–5000, default 500). Older messages are dropped so a stream you leave open all day stays responsive. You can also turn off the message fade-in animation for the smoothest scrolling on very busy channels.
@@ -87,7 +107,7 @@ npm test       # run the full offline test suite
 
 The test suite loads the real `friendly-chat.html` into jsdom with the network stubbed, then drives the app the way a user would: joining channels on all three platforms, rendering emotes from every source, filtering, sending, moderating, autocompleting, changing settings, and pushing thousands of messages through the feed to check it stays bounded. The server and YouTube parsers are covered separately. Nothing in the suite touches the network.
 
-Run one suite with `node tests/run.js <name>` (`youtube`, `server`, `render`, `app`, `perf`).
+Run one suite with `node tests/run.js <name>` (`youtube`, `updater`, `server`, `render`, `app`, `perf`).
 
 ## Built with
 

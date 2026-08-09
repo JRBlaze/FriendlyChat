@@ -390,3 +390,62 @@ describe('server: kick emote fallback', () => {
 
 // Restore the real fetch for any later suite.
 process.on('exit', () => { global.fetch = realFetch; });
+
+describe('server: update check', () => {
+  const releasePayload = {
+    tag_name: 'v9.9.9',
+    name: 'v9.9.9',
+    html_url: 'https://github.com/JRBlaze/FriendlyChat/releases/tag/v9.9.9',
+    body: 'Shiny new things.',
+    assets: [
+      { name: 'Friendly Chat Setup 9.9.9.exe', size: 123, browser_download_url: 'https://github.com/JRBlaze/FriendlyChat/releases/download/v9.9.9/Setup.exe' },
+    ],
+  };
+
+  it('reports an available update for the caller platform', async () => {
+    stubFetch(async (url) => {
+      if (url.includes('releases/latest')) return jsonResult(releasePayload);
+      return jsonResult({});
+    });
+    await withServer({}, async (port) => {
+      const res = await request(port, 'GET', '/update-check?current=1.0.0&platform=win32&arch=x64');
+      assertEqual(res.status, 200);
+      assertEqual(res.json.available, true);
+      assertEqual(res.json.latestVersion, '9.9.9');
+      assertEqual(res.json.asset.name, 'Friendly Chat Setup 9.9.9.exe');
+    });
+  });
+
+  it('reports no update when already current', async () => {
+    stubFetch(async () => jsonResult(releasePayload));
+    await withServer({}, async (port) => {
+      const res = await request(port, 'GET', '/update-check?current=9.9.9&platform=win32&arch=x64');
+      assertEqual(res.json.available, false);
+    });
+  });
+
+  it('caches the answer so GitHub is not hammered', async () => {
+    let calls = 0;
+    stubFetch(async () => { calls++; return jsonResult(releasePayload); });
+    await withServer({}, async (port) => {
+      await request(port, 'GET', '/update-check?current=1.0.0&platform=win32&arch=x64');
+      const second = await request(port, 'GET', '/update-check?current=1.0.0&platform=win32&arch=x64');
+      assertEqual(calls, 1);
+      assertEqual(second.json.cached, true);
+
+      const forced = await request(port, 'GET', '/update-check?current=1.0.0&platform=win32&arch=x64&force=1');
+      assertEqual(calls, 2);
+      assertEqual(forced.json.cached, false);
+    });
+  });
+
+  it('reports a GitHub failure with the releases page as a fallback', async () => {
+    stubFetch(async () => jsonResult({}, 403));
+    await withServer({}, async (port) => {
+      const res = await request(port, 'GET', '/update-check?current=1.0.0&platform=win32&arch=x64');
+      assertEqual(res.status, 502);
+      assertIncludes(res.json.error, 'rate limit');
+      assertIncludes(res.json.releaseUrl, 'github.com/JRBlaze/FriendlyChat/releases');
+    });
+  });
+});

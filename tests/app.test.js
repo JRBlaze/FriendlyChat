@@ -1076,3 +1076,374 @@ describe('app: youtube panel and feed stay in sync', () => {
     assertEqual(a.api().S.channels.youtube, null);
   });
 });
+
+describe('app: kick emotes are available without being posted', () => {
+  const KICK_EMOTE_PAYLOAD = [
+    { id: 'emoji', name: 'Emoji', emotes: [{ id: 1, name: 'kickSmile' }] },
+    { id: 'Global', name: 'Global', emotes: [{ id: 2, name: 'kickGlobal' }] },
+    { id: 42, slug: 'kickstreamer', emotes: [
+      { id: 3, name: 'streamerHype', subscribers_only: true },
+      { id: 4, name: 'streamerLove', subscribers_only: true },
+    ] },
+  ];
+
+  it('fills the emote picker on join, before anyone posts an emote', async () => {
+    const a = await boot({ electronAPI: { fetchKickEmotes: async () => KICK_EMOTE_PAYLOAD } });
+    a.click('.skip-btn');
+    stubKick(a);
+    a.type('#ci-kick', 'kickstreamer');
+    a.click('#jb-kick');
+    await a.tick(5);
+
+    // No chat message has arrived at all at this point.
+    assertEqual(a.$$('#feed .msg').length, 0);
+
+    a.click('#emote-btn');
+    const names = a.$$('#emote-results .emote-grid-item').map(el => el.getAttribute('title')).sort();
+    assertEqual(names, ['kickGlobal', 'kickSmile', 'streamerHype', 'streamerLove']);
+    assertIncludes(a.$('#emote-results').textContent, 'Kick Channel (2)');
+    assertIncludes(a.$('#emote-results').textContent, 'Kick Global (1)');
+  });
+
+  it('makes subscriber emotes completable by name right away', async () => {
+    const a = await boot({ electronAPI: { fetchKickEmotes: async () => KICK_EMOTE_PAYLOAD } });
+    a.click('.skip-btn');
+    stubKick(a);
+    a.type('#ci-kick', 'kickstreamer');
+    a.click('#jb-kick');
+    await a.tick(5);
+
+    a.type('#send-input', ':streamer');
+    assertEqual(a.$$('#autocomplete-popup .ac-item').length, 2);
+    a.key('#send-input', 'Tab');
+    assertEqual(a.$('#send-input').value, 'streamerHype ');
+  });
+
+  it('retries once when Kick blocks the first request', async () => {
+    let calls = 0;
+    const a = await boot({
+      electronAPI: {
+        fetchKickEmotes: async () => { calls++; return calls === 1 ? null : KICK_EMOTE_PAYLOAD; },
+      },
+    });
+    a.click('.skip-btn');
+    stubKick(a);
+    a.fetch.route('/kick-emotes', () => a.fetch.json({ error: 'blocked' }, 403));
+    a.type('#ci-kick', 'kickstreamer');
+    a.click('#jb-kick');
+    await a.wait(1400);
+    assert(calls >= 2, `expected a retry, saw ${calls} attempt(s)`);
+    assert(a.api().S.nativeEmotes.kick.kickGlobal, 'the retry should have loaded emotes');
+  });
+
+  it('restores global emotes at startup with no channel joined', async () => {
+    const first = await boot({ electronAPI: { fetchKickEmotes: async () => KICK_EMOTE_PAYLOAD } });
+    first.click('.skip-btn');
+    stubKick(first);
+    first.type('#ci-kick', 'kickstreamer');
+    first.click('#jb-kick');
+    await first.tick(5);
+    const stored = first.window.localStorage.getItem('kick_emotes_cache_v2');
+    assert(stored, 'emotes should have been cached');
+
+    // A fresh launch: nothing joined, no network.
+    const b = await boot({ storage: { kick_emotes_cache_v2: stored } });
+    b.click('.skip-btn');
+    assertEqual(b.api().S.channels.kick, null);
+    assert(b.api().S.nativeEmotes.kick.kickGlobal, 'global emotes should be back');
+    assert(b.api().S.nativeEmotes.kick.kickSmile, 'emoji should be back');
+    assert(!b.api().S.nativeEmotes.kick.streamerHype, 'channel emotes must not leak between channels');
+
+    assert(!b.$('#emote-btn').disabled, 'the picker must be reachable');
+    b.click('#emote-btn');
+    assertEqual(b.$('#emote-count').textContent, '2');
+  });
+
+  it('keeps channel emotes separated per channel in the cache', async () => {
+    const a = await boot();
+    a.click('.skip-btn');
+    const S = a.api().S;
+    S.nativeEmotes.kick = {
+      kickGlobal: { url: 'https://x/g.png', source: 'Kick Global' },
+      aOnly: { url: 'https://x/a.png', source: 'Kick Channel' },
+    };
+    a.window.eval(`cacheKickEmotes('channel-a')`);
+    S.nativeEmotes.kick = {
+      kickGlobal: { url: 'https://x/g.png', source: 'Kick Global' },
+      bOnly: { url: 'https://x/b.png', source: 'Kick Channel' },
+    };
+    a.window.eval(`cacheKickEmotes('channel-b')`);
+
+    const cache = JSON.parse(a.window.localStorage.getItem('kick_emotes_cache_v2'));
+    assertEqual(Object.keys(cache.global.emotes), ['kickGlobal']);
+    assertEqual(Object.keys(cache.channels['channel-a'].emotes), ['aOnly']);
+    assertEqual(Object.keys(cache.channels['channel-b'].emotes), ['bOnly']);
+  });
+
+  it('does not file passively collected emotes as global', async () => {
+    const a = await boot();
+    a.click('.skip-btn');
+    stubKick(a);
+    a.fetch.route('/kick-emotes', () => a.fetch.json({ error: 'blocked' }, 403));
+    a.type('#ci-kick', 'kickstreamer');
+    a.click('#jb-kick');
+    await a.tick(4);
+    const ws = a.ws.byUrl('pusher.com').pop();
+    ws.emit(JSON.stringify({ event: 'pusher:connection_established', data: '{}' }));
+    await a.tick(2);
+    ws.emit(JSON.stringify({
+      event: 'App\\Events\\ChatMessageEvent',
+      data: JSON.stringify({ id: 'k3', content: 'hi [emote:900:seenInChat]', sender: { id: 1, username: 'Fan' } }),
+    }));
+    assertEqual(a.api().S.nativeEmotes.kick.seenInChat.source, 'Kick Channel');
+    const cache = JSON.parse(a.window.localStorage.getItem('kick_emotes_cache_v2'));
+    assertEqual(cache.global, null);
+    assert(cache.channels.kickstreamer.emotes.seenInChat, 'it belongs to this channel only');
+  });
+
+  it('warms the cache from the most recent channel when globals expired', async () => {
+    let asked = null;
+    const a = await boot({
+      storage: {
+        recent_chat_channels_v1: JSON.stringify({ kick: [{ name: 'lastchannel', lastOpened: Date.now() }] }),
+      },
+      electronAPI: {
+        fetchKickEmotes: async (channel) => { asked = channel; return KICK_EMOTE_PAYLOAD; },
+      },
+    });
+    await a.tick(4);
+    assertEqual(asked, 'lastchannel');
+    assert(a.api().S.nativeEmotes.kick.kickGlobal, 'globals should be warmed in the background');
+  });
+
+  it('says so in the feed when the emote list cannot be loaded', async () => {
+    const a = await boot();
+    a.click('.skip-btn');
+    stubKick(a);
+    a.fetch.route('/kick-emotes', () => a.fetch.json({ error: 'blocked' }, 403));
+    a.type('#ci-kick', 'kickstreamer');
+    a.click('#jb-kick');
+    await a.wait(3600);
+    a.flush();
+    assertIncludes(a.$('#feed').textContent, 'could not load the channel emote list');
+  });
+});
+
+describe('app: version display', () => {
+  it('shows the version from /config in the top bar and settings', async () => {
+    const a = await boot({
+      config: { twitch: { client_id: 'x' }, kick: { client_id: 'y' }, has_kick: true, version: '9.9.9' },
+    });
+    await a.tick(2);
+    assertEqual(a.$('#app-version').textContent, 'v9.9.9');
+    a.click('.skip-btn');
+    a.click('#settings-btn');
+    assertEqual(a.$('#settings-version').textContent, 'Friendly Chat v9.9.9');
+  });
+
+  it('hides the badge when the server does not report a version', async () => {
+    const a = await boot({
+      config: { twitch: { client_id: 'x' }, kick: { client_id: 'y' }, has_kick: true },
+    });
+    await a.tick(2);
+    assertEqual(a.$('#app-version').textContent, '');
+  });
+});
+
+describe('app: update notification', () => {
+  const UPDATE = {
+    available: true,
+    currentVersion: '1.4.0',
+    latestVersion: '1.5.0',
+    name: 'v1.5.0',
+    notes: 'Faster emotes.\nBetter YouTube.',
+    releaseUrl: 'https://github.com/JRBlaze/FriendlyChat/releases/tag/v1.5.0',
+    asset: { name: 'Setup.exe', url: 'https://github.com/JRBlaze/FriendlyChat/releases/download/v1.5.0/Setup.exe', size: 2048 },
+  };
+
+  function electronUpdateAPI(overrides = {}) {
+    return {
+      getUpdateEnvironment: async () => ({ platform: 'win32', arch: 'x64', version: '1.4.0' }),
+      downloadUpdate: async () => ({ path: '/tmp/friendly-chat-updates/Setup.exe', size: 2048 }),
+      installUpdate: async () => ({ opened: 'installer', quitting: true }),
+      onUpdateProgress: () => () => {},
+      ...overrides,
+    };
+  }
+
+  it('shows a banner when a newer release exists', async () => {
+    const a = await boot({
+      config: { twitch: { client_id: 'x' }, kick: { client_id: 'y' }, version: '1.4.0' },
+      routes: [['/update-check', () => UPDATE]],
+      electronAPI: electronUpdateAPI(),
+    });
+    a.click('.skip-btn');
+    await a.api().checkForUpdate();
+    assert(!a.$('#update-banner').classList.contains('hidden'), 'banner should be visible');
+    assertIncludes(a.$('#update-title').textContent, 'Friendly Chat 1.5.0');
+    assertIncludes(a.$('#update-title').textContent, 'you have 1.4.0');
+    assertEqual(a.$('#update-action').textContent, 'Download & install');
+  });
+
+  it('stays quiet when the app is current', async () => {
+    const a = await boot({
+      routes: [['/update-check', () => ({ available: false, currentVersion: '1.4.0', latestVersion: '1.4.0' })]],
+    });
+    a.click('.skip-btn');
+    await a.api().checkForUpdate();
+    assert(a.$('#update-banner').classList.contains('hidden'));
+  });
+
+  it('sends the running version, platform and arch to the server', async () => {
+    const a = await boot({
+      config: { twitch: { client_id: 'x' }, kick: { client_id: 'y' }, version: '1.4.0' },
+      routes: [['/update-check', () => ({ available: false })]],
+      electronAPI: electronUpdateAPI(),
+    });
+    a.click('.skip-btn');
+    await a.api().checkForUpdate();
+    const call = a.fetch.callsTo('/update-check')[0];
+    assertIncludes(call.url, 'current=1.4.0');
+    assertIncludes(call.url, 'platform=win32');
+    assertIncludes(call.url, 'arch=x64');
+  });
+
+  it('shows release notes on demand', async () => {
+    const a = await boot({ routes: [['/update-check', () => UPDATE]], electronAPI: electronUpdateAPI() });
+    a.click('.skip-btn');
+    await a.api().checkForUpdate();
+    assert(!a.$('#update-notes').classList.contains('open'));
+    a.click('#update-notes-toggle');
+    assert(a.$('#update-notes').classList.contains('open'));
+    assertIncludes(a.$('#update-notes').textContent, 'Faster emotes.');
+    assertEqual(a.$('#update-notes-toggle').textContent, 'Hide notes');
+  });
+
+  it('downloads and hands the installer to the OS', async () => {
+    let downloadedAsset = null;
+    let installedPath = '';
+    const a = await boot({
+      routes: [['/update-check', () => UPDATE]],
+      electronAPI: electronUpdateAPI({
+        downloadUpdate: async (asset) => { downloadedAsset = asset; return { path: '/tmp/friendly-chat-updates/Setup.exe', size: 2048 }; },
+        installUpdate: async (p) => { installedPath = p; return { opened: 'installer', quitting: true }; },
+      }),
+    });
+    a.click('.skip-btn');
+    await a.api().checkForUpdate();
+    await a.api().startUpdateDownload();
+
+    assertEqual(downloadedAsset.url, UPDATE.asset.url);
+    assertEqual(installedPath, '/tmp/friendly-chat-updates/Setup.exe');
+    a.flush();
+    assertIncludes(a.$('#feed').textContent, 'Installer started');
+  });
+
+  it('reports a failed download instead of hanging', async () => {
+    const a = await boot({
+      routes: [['/update-check', () => UPDATE]],
+      electronAPI: electronUpdateAPI({ downloadUpdate: async () => ({ error: 'network died' }) }),
+    });
+    a.click('.skip-btn');
+    await a.api().checkForUpdate();
+    await a.api().startUpdateDownload();
+    a.flush();
+    assertIncludes(a.$('#feed').textContent, 'Update download failed: network died');
+    assertEqual(a.$('#update-action').textContent, 'Retry download');
+    assertEqual(a.$('#update-action').disabled, false);
+  });
+
+  it('offers the release page when there is no build for this platform', async () => {
+    let openedUrl = '';
+    const a = await boot({
+      routes: [['/update-check', () => ({ ...UPDATE, asset: null, reason: 'no-asset-for-platform' })]],
+      electronAPI: electronUpdateAPI(),
+    });
+    a.click('.skip-btn');
+    a.window.open = (url) => { openedUrl = url; return null; };
+    await a.api().checkForUpdate();
+    assertEqual(a.$('#update-action').textContent, 'Open release page');
+    await a.api().startUpdateDownload();
+    assertIncludes(openedUrl, '/releases/tag/v1.5.0');
+  });
+
+  it('links to the release page in a plain browser', async () => {
+    let openedUrl = '';
+    const a = await boot({ routes: [['/update-check', () => UPDATE]] });
+    a.click('.skip-btn');
+    a.window.open = (url) => { openedUrl = url; return null; };
+    await a.api().checkForUpdate();
+    assertEqual(a.$('#update-action').textContent, 'Open release page');
+    await a.api().startUpdateDownload();
+    assertIncludes(openedUrl, '/releases/tag/v1.5.0');
+  });
+
+  it('remembers a skipped version and stops nagging', async () => {
+    const a = await boot({ routes: [['/update-check', () => UPDATE]], electronAPI: electronUpdateAPI() });
+    a.click('.skip-btn');
+    await a.api().checkForUpdate();
+    a.click('#update-skip');
+    assert(a.$('#update-banner').classList.contains('hidden'));
+    assertEqual(a.api().settings.skippedVersion, '1.5.0');
+
+    // A later automatic check must not bring it back.
+    await a.api().checkForUpdate();
+    assert(a.$('#update-banner').classList.contains('hidden'), 'a skipped version must stay hidden');
+  });
+
+  it('an explicit check overrides a skipped version', async () => {
+    const a = await boot({
+      storage: { friendly_chat_settings_v1: JSON.stringify({ skippedVersion: '1.5.0' }) },
+      routes: [['/update-check', () => UPDATE]],
+      electronAPI: electronUpdateAPI(),
+    });
+    a.click('.skip-btn');
+    await a.api().checkForUpdate();
+    assert(a.$('#update-banner').classList.contains('hidden'));
+    await a.api().checkForUpdate({ manual: true });
+    assert(!a.$('#update-banner').classList.contains('hidden'));
+  });
+
+  it('Later hides the banner without skipping the version', async () => {
+    const a = await boot({ routes: [['/update-check', () => UPDATE]], electronAPI: electronUpdateAPI() });
+    a.click('.skip-btn');
+    await a.api().checkForUpdate();
+    a.click('#update-later');
+    assert(a.$('#update-banner').classList.contains('hidden'));
+    assertEqual(a.api().settings.skippedVersion, '');
+  });
+
+  it('surfaces a check failure in settings without breaking the app', async () => {
+    const a = await boot({
+      routes: [['/update-check', () => a.fetch.json({ error: 'GitHub rate limit reached' }, 502)]],
+    });
+    a.click('.skip-btn');
+    const result = await a.api().checkForUpdate({ manual: true });
+    assertIncludes(result.error, 'rate limit');
+    assert(a.$('#update-banner').classList.contains('hidden'));
+    assertEqual(a.consoleErrors.length, 0);
+  });
+
+  it('honours the auto-check toggle', async () => {
+    const a = await boot({ routes: [['/update-check', () => UPDATE]] });
+    a.click('.skip-btn');
+    a.click('#settings-btn');
+    a.change('#set-auto-update', false);
+    assertEqual(a.api().settings.autoUpdateCheck, false);
+    assertEqual(JSON.parse(a.window.localStorage.getItem('friendly_chat_settings_v1')).autoUpdateCheck, false);
+  });
+
+  it('clears a skipped version from settings', async () => {
+    const a = await boot({
+      storage: { friendly_chat_settings_v1: JSON.stringify({ skippedVersion: '1.5.0' }) },
+      routes: [['/update-check', () => UPDATE]],
+      electronAPI: electronUpdateAPI(),
+    });
+    a.click('.skip-btn');
+    await a.api().checkForUpdate();
+    a.click('#settings-btn');
+    a.click('#set-clear-skip');
+    assertEqual(a.api().settings.skippedVersion, '');
+    assert(!a.$('#update-banner').classList.contains('hidden'), 'the banner should come back');
+  });
+});
