@@ -31,6 +31,7 @@
       "preload.js",
       "server.js",
       "youtube.js",
+      "updater.js",
       "friendly-chat.html",
       "config.json",
       "icon.png"

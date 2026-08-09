@@ -207,6 +207,25 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .youtube-chat.hidden{display:none;}
 .youtube-placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:28px;text-align:center;color:var(--text-muted);font-size:12px;font-family:'JetBrains Mono',monospace;line-height:1.6;}
 .youtube-placeholder.hidden{display:none;}
+/* UPDATE BANNER */
+.update-banner{display:flex;flex-direction:column;gap:8px;padding:10px 16px;background:rgba(124,107,255,0.10);border-bottom:1px solid rgba(124,107,255,0.30);flex-shrink:0;}
+.update-banner.hidden{display:none;}
+.update-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.update-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);flex-shrink:0;}
+.update-title{font-size:13px;color:var(--text);flex:1;min-width:180px;}
+.update-title strong{font-weight:600;}
+.update-btn{padding:6px 14px;border-radius:7px;border:none;background:var(--accent);color:#fff;font-size:12px;font-weight:500;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;}
+.update-btn:hover{opacity:0.88;}
+.update-btn:disabled{opacity:0.45;cursor:not-allowed;}
+.update-link{background:none;border:none;color:var(--text-muted);font-size:12px;font-family:'DM Sans',sans-serif;cursor:pointer;text-decoration:underline;text-underline-offset:2px;padding:0;white-space:nowrap;}
+.update-link:hover{color:var(--text);}
+.update-notes{display:none;max-height:170px;overflow-y:auto;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12px;font-family:'JetBrains Mono',monospace;color:var(--text-muted);white-space:pre-wrap;line-height:1.5;word-break:break-word;}
+.update-notes.open{display:block;}
+.update-progress{display:none;align-items:center;gap:10px;}
+.update-progress.open{display:flex;}
+.update-bar{flex:1;height:6px;border-radius:3px;background:var(--surface3);overflow:hidden;min-width:120px;}
+.update-bar span{display:block;height:100%;width:0;background:var(--accent);transition:width 0.15s linear;}
+.update-pct{font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text-muted);min-width:96px;text-align:right;}
 .auth-banner{padding:7px 16px;background:rgba(255,200,0,0.07);border-bottom:1px solid rgba(255,200,0,0.15);display:flex;align-items:center;gap:10px;flex-shrink:0;font-size:12px;color:rgba(255,200,0,0.8);}
 .auth-banner.hidden{display:none;}
 .auth-banner-dot{width:5px;height:5px;border-radius:50%;background:rgba(255,200,0,0.8);flex-shrink:0;}
@@ -502,6 +521,21 @@ html[data-animations="off"] .msg,html[data-animations="off"] .sys-msg{animation:
   </div>
   <div class="app-body">
     <div class="chat-col">
+      <div class="update-banner hidden" id="update-banner">
+        <div class="update-row">
+          <div class="update-dot"></div>
+          <span class="update-title" id="update-title"></span>
+          <button class="update-link" id="update-notes-toggle">What's new</button>
+          <button class="update-btn" id="update-action">Download &amp; install</button>
+          <button class="update-link" id="update-skip">Skip this version</button>
+          <button class="update-link" id="update-later">Later</button>
+        </div>
+        <div class="update-progress" id="update-progress">
+          <div class="update-bar"><span id="update-bar-fill"></span></div>
+          <span class="update-pct" id="update-pct">0%</span>
+        </div>
+        <div class="update-notes" id="update-notes"></div>
+      </div>
       <div class="auth-banner hidden" id="auth-banner">
         <div class="auth-banner-dot"></div>
         <span>Read-only mode. <button class="banner-link" onclick="openOAuth()">Connect accounts</button> to send messages.</span>
@@ -614,6 +648,21 @@ html[data-animations="off"] .msg,html[data-animations="off"] .sys-msg{animation:
         </label>
         <input type="checkbox" id="set-animations" checked>
       </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Updates</h3>
+      <div class="setting-row">
+        <label for="set-auto-update">Check GitHub for new releases
+          <small>Checks on launch and every few hours. Nothing installs without you asking.</small>
+        </label>
+        <input type="checkbox" id="set-auto-update">
+      </div>
+      <div class="setting-row">
+        <button class="settings-btn" id="set-check-update">Check for updates now</button>
+        <button class="settings-btn" id="set-clear-skip">Clear skipped version</button>
+      </div>
+      <div class="settings-status" id="set-update-status"></div>
     </div>
 
     <div class="settings-footer">
@@ -783,6 +832,8 @@ const DEFAULT_SETTINGS = {
   extraNicknames: '',
   maxMessages: MAX_MESSAGES_DEFAULT,
   animations: true,
+  autoUpdateCheck: true,
+  skippedVersion: '',
 };
 
 function clampNumber(value, min, max, fallback) {
@@ -801,6 +852,8 @@ function loadSettings() {
     extraNicknames: typeof stored.extraNicknames === 'string' ? stored.extraNicknames : '',
     maxMessages:    clampNumber(stored.maxMessages, MAX_MESSAGES_MIN, MAX_MESSAGES_MAX, MAX_MESSAGES_DEFAULT),
     animations:     stored.animations !== undefined ? !!stored.animations : DEFAULT_SETTINGS.animations,
+    autoUpdateCheck: stored.autoUpdateCheck !== undefined ? !!stored.autoUpdateCheck : DEFAULT_SETTINGS.autoUpdateCheck,
+    skippedVersion: typeof stored.skippedVersion === 'string' ? stored.skippedVersion : '',
   };
 }
 
@@ -900,6 +953,192 @@ function alertMention(platform, author, text) {
   lastAlertAt = now;
   playMentionSound();
   showMentionNotification(platform, author, text);
+}
+
+// ── Updates ──────────────────────────────────────────────────────────────────
+// The local server asks GitHub which release is newest; the Electron main
+// process does the downloading and hands the installer to the OS. In a plain
+// browser there is nothing to install, so the banner links to the release page.
+
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const UPDATE_FIRST_CHECK_DELAY_MS = 8000;
+const RELEASES_PAGE_URL = 'https://github.com/JRBlaze/FriendlyChat/releases';
+
+const U = {
+  info: null,        // the last update-check result
+  downloading: false,
+  downloadedPath: '',
+  environment: null, // { platform, arch, version } when running in Electron
+  unsubscribeProgress: null,
+};
+
+function formatBytes(bytes) {
+  const n = Number(bytes) || 0;
+  if(n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  if(n >= 1024) return `${Math.round(n / 1024)} KB`;
+  return `${n} B`;
+}
+
+async function updateEnvironment() {
+  if(U.environment) return U.environment;
+  if(window.electronAPI?.getUpdateEnvironment) {
+    try { U.environment = await window.electronAPI.getUpdateEnvironment(); }
+    catch(_) { U.environment = null; }
+  }
+  return U.environment;
+}
+
+// Returns the update info, or an { error } object. `manual` skips the server
+// cache and reports "you are up to date" instead of staying silent.
+async function checkForUpdate({ manual = false } = {}) {
+  const env = await updateEnvironment();
+  const params = new URLSearchParams({ current: APP_VERSION || '0.0.0' });
+  if(env?.platform) params.set('platform', env.platform);
+  if(env?.arch) params.set('arch', env.arch);
+  if(manual) params.set('force', '1');
+
+  try {
+    const res = await fetch(`/update-check?${params.toString()}`);
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+    U.info = data;
+    try { localStorage.setItem('update_last_checked', String(Date.now())); } catch(_) {}
+
+    if(data.available && data.latestVersion !== settings.skippedVersion) showUpdateBanner(data);
+    else if(data.available && manual) showUpdateBanner(data); // an explicit check overrides a skip
+    return data;
+  } catch(e) {
+    dbg('update', 'Check failed', e.message);
+    return { error: e.message };
+  }
+}
+
+function showUpdateBanner(info) {
+  const banner = document.getElementById('update-banner');
+  const title = document.getElementById('update-title');
+  const notes = document.getElementById('update-notes');
+  const action = document.getElementById('update-action');
+  if(!banner) return;
+
+  title.innerHTML = `<strong>Friendly Chat ${escapeHtml(info.latestVersion)}</strong> is available`
+    + ` — you have ${escapeHtml(info.currentVersion || APP_VERSION || 'an older version')}.`;
+
+  notes.textContent = info.notes || 'No release notes were provided.';
+  notes.classList.remove('open');
+
+  const canInstall = !!(info.asset && window.electronAPI?.downloadUpdate);
+  action.textContent = canInstall ? 'Download & install' : 'Open release page';
+  action.disabled = false;
+
+  document.getElementById('update-progress').classList.remove('open');
+  document.getElementById('update-bar-fill').style.width = '0%';
+  banner.classList.remove('hidden');
+}
+
+function hideUpdateBanner() {
+  document.getElementById('update-banner')?.classList.add('hidden');
+}
+
+function openReleasePage(url) {
+  window.open(url || U.info?.releaseUrl || RELEASES_PAGE_URL, '_blank', 'noopener');
+}
+
+async function startUpdateDownload() {
+  const info = U.info;
+  if(!info) return;
+
+  // Browser mode, or a release with no build for this platform.
+  if(!info.asset || !window.electronAPI?.downloadUpdate) {
+    openReleasePage();
+    return;
+  }
+
+  if(U.downloadedPath) { await finishUpdateInstall(); return; }
+  if(U.downloading) return;
+
+  const action = document.getElementById('update-action');
+  const progress = document.getElementById('update-progress');
+  const fill = document.getElementById('update-bar-fill');
+  const pct = document.getElementById('update-pct');
+
+  U.downloading = true;
+  action.disabled = true;
+  action.textContent = 'Downloading...';
+  progress.classList.add('open');
+  fill.style.width = '0%';
+  pct.textContent = `0 / ${formatBytes(info.asset.size)}`;
+
+  U.unsubscribeProgress?.();
+  U.unsubscribeProgress = window.electronAPI.onUpdateProgress?.(({ received, total }) => {
+    const ratio = total ? Math.min(1, received / total) : 0;
+    fill.style.width = `${Math.round(ratio * 100)}%`;
+    pct.textContent = total
+      ? `${formatBytes(received)} / ${formatBytes(total)}`
+      : formatBytes(received);
+  }) || null;
+
+  try {
+    const result = await window.electronAPI.downloadUpdate(info.asset);
+    if(result?.error) throw new Error(result.error);
+
+    U.downloadedPath = result.path;
+    fill.style.width = '100%';
+    pct.textContent = formatBytes(result.size || info.asset.size);
+    action.disabled = false;
+    action.textContent = 'Install now';
+    addSys(`Update ${info.latestVersion} downloaded — click Install now to finish`);
+    await finishUpdateInstall();
+  } catch(e) {
+    action.disabled = false;
+    action.textContent = 'Retry download';
+    progress.classList.remove('open');
+    addSys(`Update download failed: ${e.message}`);
+    showToast('Update download failed');
+  } finally {
+    U.downloading = false;
+    U.unsubscribeProgress?.();
+    U.unsubscribeProgress = null;
+  }
+}
+
+async function finishUpdateInstall() {
+  if(!U.downloadedPath || !window.electronAPI?.installUpdate) return;
+  try {
+    const result = await window.electronAPI.installUpdate(U.downloadedPath);
+    if(result?.error) throw new Error(result.error);
+
+    if(result.opened === 'folder') {
+      addSys('Update downloaded. The new AppImage is in the folder that just opened — replace your current one with it.');
+      showToast('Update ready in your file manager');
+    } else if(result.quitting) {
+      addSys('Installer started — Friendly Chat will close so it can update.');
+    } else {
+      addSys('Installer opened — drag Friendly Chat into your Applications folder to finish.');
+    }
+  } catch(e) {
+    addSys(`Could not start the installer: ${e.message}`);
+    showToast('Could not start the installer');
+  }
+}
+
+function skipThisUpdate() {
+  if(U.info?.latestVersion) {
+    settings.skippedVersion = U.info.latestVersion;
+    saveSettings();
+    showToast(`Skipping ${U.info.latestVersion}`);
+  }
+  hideUpdateBanner();
+}
+
+function scheduleUpdateChecks() {
+  if(!settings.autoUpdateCheck) return;
+  setTimeout(() => {
+    checkForUpdate();
+    setInterval(() => {
+      if(settings.autoUpdateCheck) checkForUpdate();
+    }, UPDATE_CHECK_INTERVAL_MS);
+  }, UPDATE_FIRST_CHECK_DELAY_MS);
 }
 
 function getRedirectUri() {
@@ -4724,7 +4963,24 @@ function syncSettingsForm() {
   document.getElementById('set-nicknames').value        = settings.extraNicknames;
   document.getElementById('set-max-messages').value     = settings.maxMessages;
   document.getElementById('set-animations').checked     = settings.animations;
+  document.getElementById('set-auto-update').checked    = settings.autoUpdateCheck;
+  describeUpdateState();
   describeNotificationState();
+}
+
+function describeUpdateState() {
+  const el = document.getElementById('set-update-status');
+  if(!el) return;
+  const parts = [];
+  if(APP_VERSION) parts.push(`You are running v${APP_VERSION}.`);
+  if(U.info?.available && U.info.latestVersion) parts.push(`v${U.info.latestVersion} is available.`);
+  else if(U.info && !U.info.available) parts.push('No newer release found.');
+  if(settings.skippedVersion) parts.push(`Skipping v${settings.skippedVersion}.`);
+  let lastChecked = '';
+  try { lastChecked = localStorage.getItem('update_last_checked') || ''; } catch(_) {}
+  if(lastChecked) parts.push(`Last checked ${new Date(Number(lastChecked)).toLocaleString()}.`);
+  el.textContent = parts.join(' ');
+  el.className = 'settings-status';
 }
 
 function openSettings() {
@@ -4789,6 +5045,53 @@ document.getElementById('set-animations').addEventListener('change', e => {
   applySettings();
 });
 
+document.getElementById('set-auto-update').addEventListener('change', e => {
+  settings.autoUpdateCheck = e.target.checked;
+  saveSettings();
+  describeUpdateState();
+});
+
+document.getElementById('set-clear-skip').addEventListener('click', () => {
+  settings.skippedVersion = '';
+  saveSettings();
+  describeUpdateState();
+  if(U.info?.available) showUpdateBanner(U.info);
+  showToast('Skipped version cleared');
+});
+
+document.getElementById('set-check-update').addEventListener('click', async e => {
+  const btn = e.target;
+  btn.disabled = true;
+  btn.textContent = 'Checking...';
+  const result = await checkForUpdate({ manual: true });
+  btn.disabled = false;
+  btn.textContent = 'Check for updates now';
+  describeUpdateState();
+
+  if(result?.error) {
+    const el = document.getElementById('set-update-status');
+    el.textContent = `Could not reach GitHub: ${result.error}`;
+    el.className = 'settings-status warn';
+    return;
+  }
+  if(result?.available) {
+    showToast(`Version ${result.latestVersion} is available`);
+    closeSettings();
+  } else {
+    showToast('You are on the latest version');
+  }
+});
+
+// Update banner controls
+document.getElementById('update-action').addEventListener('click', startUpdateDownload);
+document.getElementById('update-skip').addEventListener('click', skipThisUpdate);
+document.getElementById('update-later').addEventListener('click', hideUpdateBanner);
+document.getElementById('update-notes-toggle').addEventListener('click', () => {
+  const notes = document.getElementById('update-notes');
+  const open = notes.classList.toggle('open');
+  document.getElementById('update-notes-toggle').textContent = open ? 'Hide notes' : "What's new";
+});
+
 document.getElementById('set-test-sound').addEventListener('click', () => {
   if(!playMentionSound(true)) showToast('Could not play the mention sound here');
 });
@@ -4806,6 +5109,7 @@ document.getElementById('set-test-notify').addEventListener('click', async () =>
 });
 
 applySettings();
+scheduleUpdateChecks();
 
 // Stop timers and sockets cleanly so a reload never leaves a poll running.
 window.addEventListener('beforeunload', () => {
@@ -4831,6 +5135,8 @@ window.__friendlyChat = {
   highlightMentionTokens, expandTextRun, selfNames, joinAllPlatforms,
   resolveYouTubeTarget, renderYouTubeMessage, applyYouTubeRemoval,
   loadSettings, saveSettings, applySettings,
+  U, checkForUpdate, showUpdateBanner, hideUpdateBanner, startUpdateDownload,
+  skipThisUpdate, setAppVersion, formatBytes,
 };
 </script>
 </body>

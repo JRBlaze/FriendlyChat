@@ -10,6 +10,7 @@ const http = require('http');
 const fs   = require('fs');
 const path = require('path');
 const yt   = require('./youtube');
+const updater = require('./updater');
 
 // Single source of truth for the version the app shows in its title bar.
 let APP_VERSION = '';
@@ -73,6 +74,10 @@ function start(CFG = {}) {
   }
 
   const staticCache = new Map();
+
+  // Latest-release lookups, keyed by version+platform+arch.
+  const updateCache = new Map();
+  const UPDATE_CACHE_TTL_MS = 15 * 60 * 1000;
 
   // videoId -> { apiKey, clientVersion, visitorData, continuation, ts }
   // Bootstrapping the live chat page is expensive, so the InnerTube handshake is
@@ -350,6 +355,32 @@ function start(CFG = {}) {
         });
       } catch(e) {
         sendJson(502, { error: e.message });
+      }
+      return;
+    }
+
+    // ── /update-check — is there a newer GitHub release? ─────────────────────
+    if(pathname === '/update-check' && req.method === 'GET') {
+      const currentVersion = requestUrl.searchParams.get('current') || APP_VERSION;
+      const platform = requestUrl.searchParams.get('platform') || process.platform;
+      const arch     = requestUrl.searchParams.get('arch') || process.arch;
+      const force    = requestUrl.searchParams.get('force') === '1';
+      const cacheKey = `${currentVersion}|${platform}|${arch}`;
+
+      // GitHub allows 60 unauthenticated calls an hour per IP, so a repeated
+      // check inside the cache window reuses the last answer.
+      const cached = updateCache.get(cacheKey);
+      if(!force && cached && Date.now() - cached.ts < UPDATE_CACHE_TTL_MS) {
+        sendJson(200, { ...cached.info, cached: true });
+        return;
+      }
+
+      try {
+        const info = await updater.checkForUpdate({ currentVersion, platform, arch });
+        updateCache.set(cacheKey, { ts: Date.now(), info });
+        sendJson(200, { ...info, cached: false });
+      } catch(e) {
+        sendJson(502, { error: e.message, releaseUrl: updater.RELEASES_PAGE });
       }
       return;
     }

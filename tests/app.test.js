@@ -1249,3 +1249,201 @@ describe('app: version display', () => {
     assertEqual(a.$('#app-version').textContent, '');
   });
 });
+
+describe('app: update notification', () => {
+  const UPDATE = {
+    available: true,
+    currentVersion: '1.4.0',
+    latestVersion: '1.5.0',
+    name: 'v1.5.0',
+    notes: 'Faster emotes.\nBetter YouTube.',
+    releaseUrl: 'https://github.com/JRBlaze/FriendlyChat/releases/tag/v1.5.0',
+    asset: { name: 'Setup.exe', url: 'https://github.com/JRBlaze/FriendlyChat/releases/download/v1.5.0/Setup.exe', size: 2048 },
+  };
+
+  function electronUpdateAPI(overrides = {}) {
+    return {
+      getUpdateEnvironment: async () => ({ platform: 'win32', arch: 'x64', version: '1.4.0' }),
+      downloadUpdate: async () => ({ path: '/tmp/friendly-chat-updates/Setup.exe', size: 2048 }),
+      installUpdate: async () => ({ opened: 'installer', quitting: true }),
+      onUpdateProgress: () => () => {},
+      ...overrides,
+    };
+  }
+
+  it('shows a banner when a newer release exists', async () => {
+    const a = await boot({
+      config: { twitch: { client_id: 'x' }, kick: { client_id: 'y' }, version: '1.4.0' },
+      routes: [['/update-check', () => UPDATE]],
+      electronAPI: electronUpdateAPI(),
+    });
+    a.click('.skip-btn');
+    await a.api().checkForUpdate();
+    assert(!a.$('#update-banner').classList.contains('hidden'), 'banner should be visible');
+    assertIncludes(a.$('#update-title').textContent, 'Friendly Chat 1.5.0');
+    assertIncludes(a.$('#update-title').textContent, 'you have 1.4.0');
+    assertEqual(a.$('#update-action').textContent, 'Download & install');
+  });
+
+  it('stays quiet when the app is current', async () => {
+    const a = await boot({
+      routes: [['/update-check', () => ({ available: false, currentVersion: '1.4.0', latestVersion: '1.4.0' })]],
+    });
+    a.click('.skip-btn');
+    await a.api().checkForUpdate();
+    assert(a.$('#update-banner').classList.contains('hidden'));
+  });
+
+  it('sends the running version, platform and arch to the server', async () => {
+    const a = await boot({
+      config: { twitch: { client_id: 'x' }, kick: { client_id: 'y' }, version: '1.4.0' },
+      routes: [['/update-check', () => ({ available: false })]],
+      electronAPI: electronUpdateAPI(),
+    });
+    a.click('.skip-btn');
+    await a.api().checkForUpdate();
+    const call = a.fetch.callsTo('/update-check')[0];
+    assertIncludes(call.url, 'current=1.4.0');
+    assertIncludes(call.url, 'platform=win32');
+    assertIncludes(call.url, 'arch=x64');
+  });
+
+  it('shows release notes on demand', async () => {
+    const a = await boot({ routes: [['/update-check', () => UPDATE]], electronAPI: electronUpdateAPI() });
+    a.click('.skip-btn');
+    await a.api().checkForUpdate();
+    assert(!a.$('#update-notes').classList.contains('open'));
+    a.click('#update-notes-toggle');
+    assert(a.$('#update-notes').classList.contains('open'));
+    assertIncludes(a.$('#update-notes').textContent, 'Faster emotes.');
+    assertEqual(a.$('#update-notes-toggle').textContent, 'Hide notes');
+  });
+
+  it('downloads and hands the installer to the OS', async () => {
+    let downloadedAsset = null;
+    let installedPath = '';
+    const a = await boot({
+      routes: [['/update-check', () => UPDATE]],
+      electronAPI: electronUpdateAPI({
+        downloadUpdate: async (asset) => { downloadedAsset = asset; return { path: '/tmp/friendly-chat-updates/Setup.exe', size: 2048 }; },
+        installUpdate: async (p) => { installedPath = p; return { opened: 'installer', quitting: true }; },
+      }),
+    });
+    a.click('.skip-btn');
+    await a.api().checkForUpdate();
+    await a.api().startUpdateDownload();
+
+    assertEqual(downloadedAsset.url, UPDATE.asset.url);
+    assertEqual(installedPath, '/tmp/friendly-chat-updates/Setup.exe');
+    a.flush();
+    assertIncludes(a.$('#feed').textContent, 'Installer started');
+  });
+
+  it('reports a failed download instead of hanging', async () => {
+    const a = await boot({
+      routes: [['/update-check', () => UPDATE]],
+      electronAPI: electronUpdateAPI({ downloadUpdate: async () => ({ error: 'network died' }) }),
+    });
+    a.click('.skip-btn');
+    await a.api().checkForUpdate();
+    await a.api().startUpdateDownload();
+    a.flush();
+    assertIncludes(a.$('#feed').textContent, 'Update download failed: network died');
+    assertEqual(a.$('#update-action').textContent, 'Retry download');
+    assertEqual(a.$('#update-action').disabled, false);
+  });
+
+  it('offers the release page when there is no build for this platform', async () => {
+    let openedUrl = '';
+    const a = await boot({
+      routes: [['/update-check', () => ({ ...UPDATE, asset: null, reason: 'no-asset-for-platform' })]],
+      electronAPI: electronUpdateAPI(),
+    });
+    a.click('.skip-btn');
+    a.window.open = (url) => { openedUrl = url; return null; };
+    await a.api().checkForUpdate();
+    assertEqual(a.$('#update-action').textContent, 'Open release page');
+    await a.api().startUpdateDownload();
+    assertIncludes(openedUrl, '/releases/tag/v1.5.0');
+  });
+
+  it('links to the release page in a plain browser', async () => {
+    let openedUrl = '';
+    const a = await boot({ routes: [['/update-check', () => UPDATE]] });
+    a.click('.skip-btn');
+    a.window.open = (url) => { openedUrl = url; return null; };
+    await a.api().checkForUpdate();
+    assertEqual(a.$('#update-action').textContent, 'Open release page');
+    await a.api().startUpdateDownload();
+    assertIncludes(openedUrl, '/releases/tag/v1.5.0');
+  });
+
+  it('remembers a skipped version and stops nagging', async () => {
+    const a = await boot({ routes: [['/update-check', () => UPDATE]], electronAPI: electronUpdateAPI() });
+    a.click('.skip-btn');
+    await a.api().checkForUpdate();
+    a.click('#update-skip');
+    assert(a.$('#update-banner').classList.contains('hidden'));
+    assertEqual(a.api().settings.skippedVersion, '1.5.0');
+
+    // A later automatic check must not bring it back.
+    await a.api().checkForUpdate();
+    assert(a.$('#update-banner').classList.contains('hidden'), 'a skipped version must stay hidden');
+  });
+
+  it('an explicit check overrides a skipped version', async () => {
+    const a = await boot({
+      storage: { friendly_chat_settings_v1: JSON.stringify({ skippedVersion: '1.5.0' }) },
+      routes: [['/update-check', () => UPDATE]],
+      electronAPI: electronUpdateAPI(),
+    });
+    a.click('.skip-btn');
+    await a.api().checkForUpdate();
+    assert(a.$('#update-banner').classList.contains('hidden'));
+    await a.api().checkForUpdate({ manual: true });
+    assert(!a.$('#update-banner').classList.contains('hidden'));
+  });
+
+  it('Later hides the banner without skipping the version', async () => {
+    const a = await boot({ routes: [['/update-check', () => UPDATE]], electronAPI: electronUpdateAPI() });
+    a.click('.skip-btn');
+    await a.api().checkForUpdate();
+    a.click('#update-later');
+    assert(a.$('#update-banner').classList.contains('hidden'));
+    assertEqual(a.api().settings.skippedVersion, '');
+  });
+
+  it('surfaces a check failure in settings without breaking the app', async () => {
+    const a = await boot({
+      routes: [['/update-check', () => a.fetch.json({ error: 'GitHub rate limit reached' }, 502)]],
+    });
+    a.click('.skip-btn');
+    const result = await a.api().checkForUpdate({ manual: true });
+    assertIncludes(result.error, 'rate limit');
+    assert(a.$('#update-banner').classList.contains('hidden'));
+    assertEqual(a.consoleErrors.length, 0);
+  });
+
+  it('honours the auto-check toggle', async () => {
+    const a = await boot({ routes: [['/update-check', () => UPDATE]] });
+    a.click('.skip-btn');
+    a.click('#settings-btn');
+    a.change('#set-auto-update', false);
+    assertEqual(a.api().settings.autoUpdateCheck, false);
+    assertEqual(JSON.parse(a.window.localStorage.getItem('friendly_chat_settings_v1')).autoUpdateCheck, false);
+  });
+
+  it('clears a skipped version from settings', async () => {
+    const a = await boot({
+      storage: { friendly_chat_settings_v1: JSON.stringify({ skippedVersion: '1.5.0' }) },
+      routes: [['/update-check', () => UPDATE]],
+      electronAPI: electronUpdateAPI(),
+    });
+    a.click('.skip-btn');
+    await a.api().checkForUpdate();
+    a.click('#settings-btn');
+    a.click('#set-clear-skip');
+    assertEqual(a.api().settings.skippedVersion, '');
+    assert(!a.$('#update-banner').classList.contains('hidden'), 'the banner should come back');
+  });
+});

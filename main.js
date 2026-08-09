@@ -3,7 +3,11 @@
 const { app, BrowserWindow, shell, ipcMain, nativeImage } = require('electron');
 const path = require('path');
 const fs   = require('fs');
+const os   = require('os');
+const { pipeline } = require('stream/promises');
+const { Readable } = require('stream');
 const yt   = require('./youtube');
+const updater = require('./updater');
 
 // Only one copy of the app may own the local server port.
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -44,6 +48,96 @@ ipcMain.handle('youtube-sign-in', async () => {
 // the app's persistent session.
 ipcMain.handle('youtube-resolve-channel', async (event, query) => {
   try { return await resolveYouTubeLiveViaWindow(query); } catch(e) { return null; }
+});
+
+// ── Update download and hand-off ─────────────────────────────────────────────
+// The installer is downloaded here (the renderer cannot write to disk) and then
+// handed to the operating system, which is what makes updating a two-click job
+// instead of a trip to the releases page.
+
+ipcMain.handle('update-environment', () => ({
+  platform: process.platform,
+  arch: process.arch,
+  version: app.getVersion(),
+}));
+
+ipcMain.handle('update-download', async (event, asset) => {
+  const url = asset?.url;
+  if(!updater.isAllowedDownloadUrl(url)) {
+    return { error: 'Refusing to download from an unexpected host' };
+  }
+
+  // Keep the filename ours: never trust a name from the network as a path.
+  const safeName = path.basename(String(asset?.name || 'friendly-chat-update')).replace(/[^\w.\-]/g, '_');
+  const targetDir = path.join(os.tmpdir(), 'friendly-chat-updates');
+  const targetPath = path.join(targetDir, safeName);
+
+  try {
+    fs.mkdirSync(targetDir, { recursive: true });
+
+    const res = await fetch(url, {
+      headers: { 'User-Agent': `FriendlyChat/${app.getVersion()}`, 'Accept': 'application/octet-stream' },
+      redirect: 'follow',
+    });
+    if(!res.ok || !res.body) throw new Error(`Download failed with HTTP ${res.status}`);
+
+    const total = Number(res.headers.get('content-length')) || Number(asset?.size) || 0;
+    let received = 0;
+    let lastReported = 0;
+
+    const source = Readable.fromWeb(res.body);
+    source.on('data', chunk => {
+      received += chunk.length;
+      const now = Date.now();
+      // Throttle so a fast connection cannot flood the renderer with IPC.
+      if(now - lastReported < 120 && received !== total) return;
+      lastReported = now;
+      if(!event.sender.isDestroyed()) {
+        event.sender.send('update-download-progress', { received, total });
+      }
+    });
+
+    await pipeline(source, fs.createWriteStream(targetPath));
+
+    if(total && received < total) throw new Error('Download ended early');
+
+    return { path: targetPath, size: received };
+  } catch(e) {
+    try { fs.unlinkSync(targetPath); } catch(_) {}
+    return { error: e.message };
+  }
+});
+
+ipcMain.handle('update-install', async (event, filePath) => {
+  const targetDir = path.join(os.tmpdir(), 'friendly-chat-updates');
+  const resolved = path.resolve(String(filePath || ''));
+  if(!resolved.startsWith(targetDir + path.sep) || !fs.existsSync(resolved)) {
+    return { error: 'Update file is missing — download it again' };
+  }
+
+  try {
+    if(process.platform === 'linux') {
+      // An AppImage is the application itself: make it runnable and show the
+      // user where it landed rather than replacing the running binary.
+      fs.chmodSync(resolved, 0o755);
+      shell.showItemInFolder(resolved);
+      return { opened: 'folder', path: resolved };
+    }
+
+    const failure = await shell.openPath(resolved);
+    if(failure) return { error: failure };
+
+    // Windows: the NSIS installer cannot overwrite files that are in use, so
+    // the app steps aside once the installer is up.
+    if(process.platform === 'win32') {
+      setTimeout(() => app.quit(), 2500);
+      return { opened: 'installer', quitting: true, path: resolved };
+    }
+    // macOS: the .dmg is now mounted for the user to drag across.
+    return { opened: 'installer', quitting: false, path: resolved };
+  } catch(e) {
+    return { error: e.message };
+  }
 });
 
 function openYouTubeSignInWindow() {
