@@ -3,11 +3,31 @@
 const { app, BrowserWindow, shell, ipcMain, nativeImage } = require('electron');
 const path = require('path');
 const fs   = require('fs');
+const yt   = require('./youtube');
+
+// Only one copy of the app may own the local server port.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if(!gotSingleInstanceLock) {
+  app.quit();
+}
 
 // Start server immediately — config.json holds all public credentials,
 // Kick secret is on the cloud proxy (never on this machine).
-const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
+const cfg = readConfig();
 const localServer = require('./server').start(cfg);
+
+function readConfig() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
+  } catch(e) {
+    console.error('Could not read config.json:', e.message);
+    return { port: 8080 };
+  }
+}
+
+// Windows shows notifications under this identity; without it the renderer's
+// Notification API is silently ignored in packaged builds.
+if(process.platform === 'win32') app.setAppUserModelId('com.friendlychat.app');
 
 // ── Kick emote fetcher via hidden BrowserWindow (bypasses Cloudflare) ─────────
 ipcMain.handle('kick-fetch-emotes', async (event, channel) => {
@@ -16,6 +36,14 @@ ipcMain.handle('kick-fetch-emotes', async (event, channel) => {
 
 ipcMain.handle('youtube-sign-in', async () => {
   return openYouTubeSignInWindow();
+});
+
+// Fallback channel → live video resolver. The local server tries a plain HTTP
+// fetch first; when YouTube answers that with a consent wall or bot check, a
+// real (hidden) browser window still resolves it because it runs Chromium with
+// the app's persistent session.
+ipcMain.handle('youtube-resolve-channel', async (event, query) => {
+  try { return await resolveYouTubeLiveViaWindow(query); } catch(e) { return null; }
 });
 
 function openYouTubeSignInWindow() {
@@ -65,26 +93,87 @@ function isAllowedYouTubeSignInUrl(rawUrl) {
   }
 }
 
-function fetchKickEmotesViaWindow(channel) {
+// Loads a URL in an offscreen window and hands the page back to `extract`.
+// Resolves with null on any failure or after `timeoutMs`.
+function withHiddenWindow(url, extract, { timeoutMs = 12000, userAgent } = {}) {
   return new Promise((resolve) => {
-    const win = new BrowserWindow({
-      show: false,
-      webPreferences: { nodeIntegration: false, contextIsolation: true },
-    });
-    let resolved = false;
-    const done = (val) => {
-      if(!resolved) { resolved = true; try { win.destroy(); } catch(e) {} resolve(val); }
+    let win;
+    try {
+      win = new BrowserWindow({
+        show: false,
+        webPreferences: { nodeIntegration: false, contextIsolation: true },
+      });
+    } catch(e) {
+      resolve(null);
+      return;
+    }
+
+    let settled = false;
+    const done = (value) => {
+      if(settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { if(win && !win.isDestroyed()) win.destroy(); } catch(_) {}
+      resolve(value);
     };
-    setTimeout(() => done(null), 10000);
+
+    const timer = setTimeout(() => done(null), timeoutMs);
+
     win.webContents.on('did-finish-load', () => {
-      win.webContents.executeJavaScript('document.body.innerText')
-        .then(text => { try { done(JSON.parse(text)); } catch(e) { done(null); } })
+      Promise.resolve()
+        .then(() => extract(win))
+        .then(done)
         .catch(() => done(null));
     });
-    win.loadURL(`https://kick.com/api/v2/channels/${channel}/emotes`, {
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    // ERR_ABORTED (-3) is what a normal server-side redirect looks like here, so
+    // only a real failure ends the attempt early.
+    win.webContents.on('did-fail-load', (event, errorCode, description, validatedURL, isMainFrame) => {
+      if(isMainFrame && errorCode !== -3) done(null);
     });
+
+    // The same redirect makes loadURL's promise reject; the events above and the
+    // timeout are the real signals.
+    win.loadURL(url, userAgent ? { userAgent } : undefined).catch(() => {});
   });
+}
+
+function fetchKickEmotesViaWindow(channel) {
+  const safeChannel = encodeURIComponent(String(channel || '').trim());
+  if(!safeChannel) return Promise.resolve(null);
+  return withHiddenWindow(
+    `https://kick.com/api/v2/channels/${safeChannel}/emotes`,
+    (win) => win.webContents.executeJavaScript('document.body.innerText')
+      .then(text => { try { return JSON.parse(text); } catch(e) { return null; } }),
+    {
+      timeoutMs: 10000,
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    }
+  );
+}
+
+async function resolveYouTubeLiveViaWindow(query) {
+  const direct = yt.parseVideoId(query);
+  if(direct) return { videoId: direct, channelName: '', sourceUrl: `https://www.youtube.com/watch?v=${direct}` };
+
+  for(const candidate of yt.channelLiveCandidates(query)) {
+    const found = await withHiddenWindow(candidate, (win) =>
+      win.webContents.executeJavaScript(`(() => ({
+        href: location.href,
+        canonical: document.querySelector('link[rel="canonical"]')?.href || '',
+        title: document.title || ''
+      }))()`)
+    );
+    if(!found) continue;
+    const videoId = yt.parseVideoId(found.href) || yt.parseVideoId(found.canonical);
+    if(videoId) {
+      return {
+        videoId,
+        channelName: String(found.title || '').replace(/\s*-\s*YouTube\s*$/i, '').trim(),
+        sourceUrl: candidate,
+      };
+    }
+  }
+  return null;
 }
 
 // ── Window ────────────────────────────────────────────────────────────────────
@@ -122,8 +211,11 @@ function createWindow() {
     autoHideMenuBar: true,
   });
 
+  let loaded = false;
   const loadApp = () => {
+    if(loaded) return;
     if(mainWindow && !mainWindow.isDestroyed()) {
+      loaded = true;
       mainWindow.loadURL(`http://localhost:${cfg.port || 8080}/friendly-chat.html`);
     }
   };
@@ -157,6 +249,15 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
-app.whenReady().then(createWindow);
-app.on('window-all-closed', () => app.quit());
-app.on('activate', () => { if(!mainWindow) createWindow(); });
+app.on('second-instance', () => {
+  if(mainWindow) {
+    if(mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
+
+if(gotSingleInstanceLock) {
+  app.whenReady().then(createWindow);
+  app.on('window-all-closed', () => app.quit());
+  app.on('activate', () => { if(!mainWindow) createWindow(); });
+}
