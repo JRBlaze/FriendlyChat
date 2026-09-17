@@ -1,4 +1,10 @@
-name               = "friendly-chat-kick-proxy"
+# A template for running a Kick sign-in proxy of your own. It is deliberately
+# NOT named friendly-chat-kick-proxy: that is the live worker this app and the
+# Friendly Chat Extension share, deployed only from
+# https://github.com/JRBlaze/FriendlyChatExtension (cloudflare-worker.js there).
+# Deploying this older copy under that name, from the account that owns it,
+# would replace the live worker and break sign-in in the extension.
+name               = "friendly-chat-kick-proxy-template"
 main               = "cloudflare-worker.js"
 compatibility_date = "2024-09-23"
 workers_dev        = true
