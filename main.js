@@ -18,7 +18,7 @@ if(!gotSingleInstanceLock) {
 // Start server immediately — config.json holds all public credentials,
 // Kick secret is on the cloud proxy (never on this machine).
 const cfg = readConfig();
-const localServer = require('./server').start(cfg);
+const localServer = gotSingleInstanceLock ? require('./server').start(cfg) : null;
 
 function readConfig() {
   try {

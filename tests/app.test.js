@@ -288,7 +288,7 @@ describe('app: youtube channel', () => {
     stubYouTube(a, {
       messages: [{
         kind: 'message', id: 'y1', author: 'YT Viewer', authorChannelId: 'UC1',
-        badges: [{ type: 'moderator', label: 'Moderator', iconUrl: '' }],
+        badges: [{ type: 'moderator', label: 'Moderator', iconUrl: 'https://www.gstatic.com/mod.png' }],
         runs: [{ type: 'text', text: 'hello from youtube' }],
         timestampUsec: '1700000000000000',
       }],
@@ -307,7 +307,8 @@ describe('app: youtube channel', () => {
     const msg = a.$('#feed .msg[data-platform="youtube"]');
     assertEqual(msg.querySelector('.m-author').dataset.user, 'YT Viewer');
     assertIncludes(msg.querySelector('.m-body').textContent, 'hello from youtube');
-    assertIncludes(msg.querySelector('.yt-badge-label').textContent, 'moderator');
+    assertEqual(msg.querySelector('.yt-badge-img').alt, 'Moderator');
+    assertEqual(msg.querySelector('.badge'), null);
     assertEqual(a.api().S.nativeEmotes.youtube[':_cozy:'].url, 'https://yt3.ggpht.com/cozy.png');
   });
 
@@ -595,7 +596,7 @@ describe('app: user menu and moderation', () => {
     a.flush();
     a.click('#feed .m-author');
     const labels = a.$$('#user-menu-actions .um-action').map(b => b.textContent);
-    assertEqual(labels.length, 2);
+    assertEqual(labels.length, 3);
     assertIncludes(labels.join('|'), 'Reply');
     assertNotIncludes(labels.join('|'), 'Ban');
   });
@@ -1090,7 +1091,7 @@ describe('app: kick emotes are available without being posted', () => {
   it('fills the emote picker on join, before anyone posts an emote', async () => {
     const a = await boot({ electronAPI: { fetchKickEmotes: async () => KICK_EMOTE_PAYLOAD } });
     a.click('.skip-btn');
-    stubKick(a);
+    stubKick(a, { ...KICK_CHANNEL, is_subscribed: true });
     a.type('#ci-kick', 'kickstreamer');
     a.click('#jb-kick');
     await a.tick(5);
@@ -1103,14 +1104,14 @@ describe('app: kick emotes are available without being posted', () => {
     // hover preview names the emote at a size worth looking at.
     const names = a.$$('#emote-results .emote-grid-item img').map(el => el.getAttribute('alt')).sort();
     assertEqual(names, ['kickGlobal', 'kickSmile', 'streamerHype', 'streamerLove']);
-    assertIncludes(a.$('#emote-results').textContent, 'Kick Channel (2)');
+    assertIncludes(a.$('#emote-results').textContent, 'kickstreamer · Kick (2)');
     assertIncludes(a.$('#emote-results').textContent, 'Kick Global (1)');
   });
 
   it('makes subscriber emotes completable by name right away', async () => {
     const a = await boot({ electronAPI: { fetchKickEmotes: async () => KICK_EMOTE_PAYLOAD } });
     a.click('.skip-btn');
-    stubKick(a);
+    stubKick(a, { ...KICK_CHANNEL, is_subscribed: true });
     a.type('#ci-kick', 'kickstreamer');
     a.click('#jb-kick');
     await a.tick(5);

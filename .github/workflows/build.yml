@@ -35,7 +35,7 @@ jobs:
               dist/latest.yml
           - platform: macOS
             os: macos-latest
-            command: npx electron-builder --mac --publish never
+            command: npx electron-builder --mac --universal --publish never
             artifact: macos
             files: |
               dist/*.dmg

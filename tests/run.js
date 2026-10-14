@@ -14,6 +14,7 @@ const SUITES = [
   'server.test.js',
   'render.test.js',
   'app.test.js',
+  'improvements.test.js',
   'perf.test.js',
 ];
 
