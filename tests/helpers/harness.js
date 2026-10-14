@@ -142,7 +142,7 @@ function makeAudioContext(state) {
 }
 
 // ── Harness ──────────────────────────────────────────────────────────────────
-async function launchApp({ storage = {}, electronAPI = null, config = null, routes = [] } = {}) {
+async function launchApp({ storage = {}, electronAPI = null, config = null, routes = [], browserSetup = null } = {}) {
   const html = fs.readFileSync(APP_HTML, 'utf8');
   const fetchImpl = makeFetch();
   const state = { notifications: [], permissionRequests: 0, tones: 0 };
@@ -170,6 +170,7 @@ async function launchApp({ storage = {}, electronAPI = null, config = null, rout
     pretendToBeVisual: true,
     virtualConsole,
     beforeParse(window) {
+      window.eval(fs.readFileSync(path.join(__dirname, '..', '..', 'app-features.js'), 'utf8') + '\n//# sourceURL=app-features.js');
       Object.entries(storage).forEach(([k, v]) => window.localStorage.setItem(k, v));
       window.fetch = fetchImpl;
       window.WebSocket = FakeWebSocket;
@@ -191,6 +192,7 @@ async function launchApp({ storage = {}, electronAPI = null, config = null, rout
       // The app logs generously; keep test output readable.
       window.console.log = () => {};
       window.console.warn = () => {};
+      if(browserSetup) browserSetup(window);
     },
   });
 

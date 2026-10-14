@@ -86,6 +86,59 @@ async function withServer(config, fn) {
 }
 
 describe('server: static files and safety', () => {
+  it('refuses malformed timeouts before resolving users or posting moderation requests', async () => {
+    let calls=0;stubFetch(async()=>{calls++;return {};});
+    await withServer({},async port=> {
+      for(const duration of [0,-1,1209601,1.2,'60',null]) {
+        assertEqual((await request(port,'POST','/kick-mod',{action:'timeout',duration,token:'t',broadcasterId:90,username:'user'})).status,400);
+      }
+      assertEqual(calls,0);
+    });
+  });
+  it('serves only the app feature script, supports HEAD, and keeps Node scripts private', async () => {
+    await withServer({}, async port => {
+      const script = await request(port, 'GET', '/app-features.js');
+      assertEqual(script.status, 200);
+      assertIncludes(script.text, 'ChatFeatures');
+      assertIncludes(script.headers['content-type'], 'text/javascript');
+      assertEqual((await request(port, 'HEAD', '/app-features.js')).text, '');
+      for(const file of ['updater.js','main.js','server.js','preload.js']) assertEqual((await request(port, 'GET', '/'+file)).status, 403);
+    });
+  });
+  it('negotiates an anonymous validated Kick connection without forwarding account tokens', async () => {
+    let calls=0;
+    stubFetch(async (url,options) => {
+      calls++;
+      assertEqual(url,'https://web.kick.com/api/v1/realtime/channels/90/chat/connection');
+      assertEqual(options.credentials,'omit');assertEqual(options.redirect,'error');
+      assertEqual(options.headers.Authorization,undefined);
+      assertEqual(JSON.parse(options.body).capabilities.accepted_providers,[{provider:'pusher'}]);
+      assert(options.signal);
+      return {data:{mode:'websocket',connections:[{provider:'pusher',credentials:{app_key:'key123',cluster:'us2'}}]}};
+    });
+    await withServer({}, async port => {
+      const result=await request(port,'POST','/kick-connection',{channelId:90,token:'never-forward'});
+      assertEqual(result.status,200);assertIncludes(result.json.url,'ws-us2.pusher.com/app/key123');
+      for(const channelId of [null,0,-1,1.2,'90','evil/path',Number.MAX_SAFE_INTEGER+1]) {
+        assertEqual((await request(port,'POST','/kick-connection',{channelId})).status,400);
+      }
+      assertEqual(calls,1);
+    });
+  });
+  it('refuses bad Kick descriptors and reports network/HTTP/JSON failures safely', async () => {
+    for(const response of [null,{}, {data:{mode:'websocket',connections:[{provider:'pusher',credentials:{app_key:'bad/path',cluster:'us2'}}]}}]) {
+      stubFetch(async ()=>response);
+      await withServer({},async port=>assertEqual((await request(port,'POST','/kick-connection',{channelId:90})).status,502));
+    }
+    for(const mode of ['network','http','json']) {
+      stubFetch(async () => {
+        if(mode==='network') throw Error('private error');
+        if(mode==='http') return jsonResult({},403);
+        return {ok:true,json:async()=>{throw Error('invalid');}};
+      });
+      await withServer({},async port=>assertEqual((await request(port,'POST','/kick-connection',{channelId:90})).status,502));
+    }
+  });
   it('serves the app at / and by name', async () => {
     stubFetch(async () => ({}));
     await withServer({}, async (port) => {
@@ -258,6 +311,31 @@ describe('server: kick endpoints', () => {
         token: 't', broadcasterId: 5, action: 'timeout', username: 'troll', duration: 300,
       });
       assertEqual(banBody.duration, 5);
+    });
+  });
+
+  it('refuses unknown moderation actions before looking up or banning a user', async () => {
+    let externalCalls = 0;
+    stubFetch(async () => { externalCalls++; return jsonResult({ user_id: 777 }); });
+    await withServer({}, async (port) => {
+      for (const action of ['unknown', '', 'pin', 'BAN', null, {}, []]) {
+        const res = await request(port, 'POST', '/kick-mod', { token: 't', broadcasterId: 5, username: 'viewer', action });
+        assertEqual(res.status, 400);
+        assertIncludes(res.json.error, 'Unsupported moderation action');
+      }
+      assertEqual(externalCalls, 0, 'a refused action must never reach the platform');
+    });
+  });
+
+  it('keeps unban as a delete request after moderation action validation', async () => {
+    let method;
+    stubFetch(async (url, options) => {
+      if (url.includes('/api/v1/channels/')) return jsonResult({ user_id: 777 });
+      method = options.method; return jsonResult({ ok: true });
+    });
+    await withServer({}, async port => {
+      const res = await request(port, 'POST', '/kick-mod', { token: 't', broadcasterId: 5, username: 'viewer', action: 'unban' });
+      assertEqual(res.status, 200); assertEqual(method, 'DELETE');
     });
   });
 

@@ -1,6 +1,6 @@
 {
   "name": "friendly-chat",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Multi-platform stream chat merger for Twitch, Kick and YouTube",
   "author": {
     "name": "JRBlaze"
@@ -8,12 +8,15 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node tests/run.js",
+    "test": "node tests/run.js && node --test tests/features.test.cjs tests/main.test.cjs tests/coverage-target.test.cjs",
     "build": "electron-builder --win --x64",
     "build:win": "electron-builder --win --x64",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux --x64",
-    "build:all": "electron-builder --win --mac --linux"
+    "build:all": "electron-builder --win --mac --linux",
+    "test:features": "node --test tests/features.test.cjs tests/main.test.cjs tests/coverage-target.test.cjs",
+    "test:coverage": "node tests/coverage.cjs",
+    "test:smoke": "electron tests/app-smoke.cjs"
   },
   "build": {
     "publish": {
@@ -33,6 +36,7 @@
       "youtube.js",
       "updater.js",
       "friendly-chat.html",
+      "app-features.js",
       "config.json",
       "icon.png"
     ],
@@ -62,6 +66,7 @@
   "devDependencies": {
     "electron": "^29.0.0",
     "electron-builder": "^24.0.0",
-    "jsdom": "^24.1.0"
+    "jsdom": "^24.1.0",
+    "c8": "^10.1.3"
   }
 }

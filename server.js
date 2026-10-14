@@ -11,6 +11,8 @@ const fs   = require('fs');
 const path = require('path');
 const yt   = require('./youtube');
 const updater = require('./updater');
+const features = require('./app-features');
+const { randomUUID } = require('crypto');
 
 // Single source of truth for the version the app shows in its title bar.
 let APP_VERSION = '';
@@ -115,6 +117,32 @@ function start(CFG = {}) {
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     if(req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
+    // This is the only JavaScript asset exposed; Node entry points stay private.
+    if(pathname === '/app-features.js' && (req.method === 'GET' || req.method === 'HEAD')) {
+      res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' });
+      res.end(req.method === 'HEAD' ? undefined : fs.readFileSync(path.join(ROOT, 'app-features.js')));
+      return;
+    }
+
+    // Anonymous connection negotiation for Kick's replacement chat service.
+    if(pathname === '/kick-connection' && req.method === 'POST') {
+      try {
+        const { channelId } = await readBody(req);
+        if(!Number.isSafeInteger(channelId) || channelId < 1) {
+          sendJson(400, { error: 'Invalid channel ID' }); return;
+        }
+        const response = await fetch(`https://web.kick.com/api/v1/realtime/channels/${channelId}/chat/connection`, {
+          method: 'POST', credentials: 'omit', redirect: 'error', cache: 'no-store',
+          signal: AbortSignal.timeout(10000),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ client: { id: randomUUID(), type: 'web' }, capabilities: { accepted_providers: [{ provider: 'pusher' }] } }),
+        });
+        if(!response.ok) throw Error('Connection refused');
+        sendJson(200, { url: features.pusherUrl(await response.json()) });
+      } catch(_) { sendJson(502, { error: 'Could not prepare Kick chat connection' }); }
+      return;
+    }
+
     // ── /config — public credentials only ───────────────────────────────────
     if(pathname === '/config' && req.method === 'GET') {
       if(PROXY_URL && !kickClientId) {
@@ -209,6 +237,10 @@ function start(CFG = {}) {
     if(pathname === '/kick-mod' && req.method === 'POST') {
       try {
         const { token, broadcasterId, action, username, duration, messageId } = await readBody(req);
+        if(!features.validModeration(action, duration)) {
+          sendJson(400, { error: 'Unsupported moderation action or duration' });
+          return;
+        }
 
         if(action === 'delete') {
           const deleteRes = await fetch(`https://api.kick.com/public/v1/chat/${encodeURIComponent(messageId)}`, {

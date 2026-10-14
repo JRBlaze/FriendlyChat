@@ -3,7 +3,7 @@
 A desktop app that merges live chat from Twitch, Kick and YouTube into one unified window. Built with Electron.
 
 ![Platform Support](https://img.shields.io/badge/platform-Windows%20%7C%20Mac%20%7C%20Linux-blue)
-![Version](https://img.shields.io/badge/version-1.5.0-green)
+![Version](https://img.shields.io/badge/version-1.6.0-green)
 
 ## What it does
 
@@ -20,6 +20,11 @@ Friendly Chat lets you watch and participate in Twitch, Kick and YouTube chats i
 - Kick's full emote list loads the moment you join, and its global set is cached so it is there before you join anything
 - Sound and/or desktop notification when your name is mentioned, each toggled separately
 - Tab autocomplete for emotes (`:emote`) and mentions (`@username`), plus a searchable emote picker
+- Favorite emotes with the star in the picker; favorites appear first, followed by streamer groups and then other categories
+- Optional quick access bar with up to eight recently sent emotes, shared across Twitch and Kick; turn it on or off in Settings
+- Recall sent messages with Up/Down, and copy a message from its username menu
+- Recover dropped connections automatically, including five-minute cooldowns after exhausted retry bursts and Kick’s replacement chat connection
+- Suspend offscreen feed images to reduce resource use on busy chats
 - Hover any emote — in the feed, the picker or the autocomplete — for a large preview with its name and where it came from
 - `/me` renders as an action, not as the raw `ACTION` wrapper Twitch sends it in
 - Replies say what they are answering, quoted above the reply with its emotes intact
@@ -69,7 +74,7 @@ Alerts are rate limited to one every 1.2 seconds, and channel history replayed o
 
 ## Emotes
 
-Every emote a platform exposes is fetched up front when you join, so the picker and `:name` autocomplete are complete immediately — nothing waits for somebody to post an emote first.
+Emote catalogs load when you join. The picker and `:name` autocomplete offer emotes with current access, while locked emotes and emotes merely seen in received messages can still render in the feed. A fresh Twitch user catalog refreshes subscription availability without deleting saved favorites or recent names. Kick subscription access requires an affirmative channel response; moderator rights do not grant subscriber emotes.
 
 Emotes are drawn everywhere a viewer typed one, not only in ordinary chat messages: the message under
 a resub, the text of an announcement and the original quoted above a reply all go through the same
@@ -77,6 +82,18 @@ renderer a chat message does. The summary wrapped around an event does not — s
 happens to spell an emote name stays a name rather than turning into a picture.
 
 Kick needs a little care because its emote endpoint sits behind Cloudflare. Friendly Chat asks for it through a hidden Electron window that carries the app's own session (so a channel you subscribe to returns its subscriber emotes), falls back to the local server in browser mode, tries both of Kick's emote paths, and retries a couple of times if the first request is turned away. Kick's global and emoji sets are cached separately from channel sets, so they are restored at startup with no channel joined. Collecting emotes from live messages still exists, but only as a last resort.
+
+The picker lists **Favorites** first, then streamers alphabetically, then categories such as global emotes, emoji and collectibles. Each emote appears once per platform. Search keeps those groups and does not lose focus as catalogs refresh. Star buttons change favorites without inserting an emote or closing the picker.
+
+The **Quick access emote bar** setting defaults to on. It shows the eight newest available emotes across joined Twitch and Kick channels, reducing the number to fit one row on narrow windows. Recent emotes are recorded after a successful send. Favorites and recent names stay on this device, and Twitch and Kick histories keep their platform identity. Clicking a recent emote inserts its name into the app composer. Kick native emotes are converted to Kick’s wire format when sent. Emote-only messages go only to destinations where every emote is available; Cheer text stays on Twitch.
+
+## Moderation and recovery
+
+The original username menu keeps API-supported delete, timeout, ban and unban actions for authenticated moderators and broadcasters. **Delete this message** acts on the clicked row, even when a newer message from the same person exists. Invalid actions and timeout durations are rejected before requests are sent. Twitch also offers **Pin for 5m**, **Pin until stream ends**, and **Unpin** for the clicked message through its [documented pins API](https://dev.twitch.tv/docs/api/reference/#pin-chat-message), using the existing chat-message moderation scope. YouTube keeps its original panel workflow.
+
+Connections have bounded retry bursts followed by an automatic five-minute cooldown. Channel changes cancel pending recovery and discard late lookups. Twitch and Kick sockets send health pings and close unresponsive connections. Twitch tokens are revalidated hourly; temporary validation outages preserve the session. Incoming Twitch Gigantify metadata enlarges only the last native emote, and YouTube role badges use validated image URLs.
+
+These additions run through the standalone app’s existing interface and APIs. Browser overlays, extension setup pages, native Share/claim controls, native GIF posting, paid-send controls and native pin actions are not included. The Chrome extension is only a read-only reference.
 
 ## Updates
 
@@ -118,7 +135,11 @@ npm test       # run the full offline test suite
 
 The test suite loads the real `friendly-chat.html` into jsdom with the network stubbed, then drives the app the way a user would: joining channels on all three platforms, rendering emotes from every source, filtering, sending, moderating, autocompleting, changing settings, and pushing thousands of messages through the feed to check it stays bounded. The server and YouTube parsers are covered separately. Nothing in the suite touches the network.
 
-Run one suite with `node tests/run.js <name>` (`youtube`, `updater`, `server`, `render`, `app`, `perf`).
+Run one suite with `node tests/run.js <name>` (`youtube`, `updater`, `server`, `render`, `app`, `improvements`, `perf`).
+
+`npm run test:features` runs the shared feature and Electron bootstrap unit tests. `npm run test:coverage` runs the full offline app suite with V8 coverage of the actual inline renderer, the bootstrap tests, and c8 coverage of `app-features.js`. It gates all shared-feature statements, branches, functions and lines at 100%, and separately gates changed executable renderer/server/main lines, functions and V8 block ranges at 100% against the current Git diff. Set `FC_COVERAGE_BASE` to a commit or tag to include committed changes; GitHub checks use the PR base or the preceding main commit. Invalid base references fail the check. These are changed-code measurements, not a claim of 100% coverage of the historical application. Reports are written to `coverage/`. GitHub runs these checks on Node 20 and 24 before merging release changes.
+
+`npm run test:smoke` opens a hidden Electron test window with an isolated temporary profile and offline fixtures. It checks the original preload, the emote picker order, the toggle, and one-row quick-bar geometry at 1280, 800 and 520px. It saves `app-smoke.png`; it does not send chat, moderate a live channel, or access signed-in platform windows.
 
 ## Built with
 

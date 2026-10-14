@@ -1,0 +1,32 @@
+name: Test Friendly Chat
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests and coverage (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 24]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - name: Full suite and 100% changed-code coverage
+        run: npm run test:coverage
+        env:
+          FC_COVERAGE_BASE: ${{ github.event.pull_request.base.sha || github.event.before || 'v1.5.0' }}

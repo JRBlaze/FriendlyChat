@@ -2,3 +2,9 @@ node_modules/
 dist/
 *.zip
 *.svg
+
+coverage/
+*-tests.log
+*-validation.log
+*.log
+app-smoke.png
