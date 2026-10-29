@@ -92,7 +92,7 @@ describe('app: startup', () => {
 });
 
 describe('app: twitch channel', () => {
-  it('joins, authenticates anonymously and reports the connection', async () => {
+  it('joins and authenticates anonymously without connection chatter in the feed', async () => {
     const a = await boot();
     a.click('.skip-btn');
     const ws = await joinTwitch(a, 'somestreamer');
@@ -101,7 +101,7 @@ describe('app: twitch channel', () => {
     assertIncludes(ws.sent.join('\n'), 'PASS oauth:justinfan12345');
     assertIncludes(ws.sent.join('\n'), 'JOIN #somestreamer');
     a.flush();
-    assertIncludes(a.$('#feed').textContent, 'Connected to Twitch: somestreamer');
+    assertNotIncludes(a.$('#feed').textContent, 'Connected to Twitch: somestreamer');
     assertEqual(a.$('#jb-twitch').textContent, 'Leave');
   });
 
@@ -166,8 +166,8 @@ describe('app: twitch channel', () => {
     const before = a.ws.byUrl('irc-ws.chat.twitch.tv').length;
     ws.close();
     a.flush();
-    assertIncludes(a.$('#feed').textContent, 'disconnected');
-    assertIncludes(a.$('#feed').textContent, 'reconnecting in 2s');
+    assertNotIncludes(a.$('#feed').textContent, 'disconnected');
+    assertNotIncludes(a.$('#feed').textContent, 'reconnecting in 2s');
     assertEqual(a.ws.byUrl('irc-ws.chat.twitch.tv').length, before, 'reconnect must be scheduled, not immediate');
   });
 
@@ -178,7 +178,7 @@ describe('app: twitch channel', () => {
     a.click('#jb-twitch');
     a.flush();
     assertNotIncludes(a.$('#feed').textContent, 'disconnected');
-    assertIncludes(a.$('#feed').textContent, 'Left Twitch channel');
+    assertNotIncludes(a.$('#feed').textContent, 'Left Twitch channel');
     assertEqual(a.api().S.channels.twitch, null);
   });
 
@@ -210,7 +210,7 @@ describe('app: kick channel', () => {
     assertIncludes(ws.sent.join('\n'), 'chatrooms.777.v2');
     assertIncludes(ws.sent.join('\n'), 'channel.90');
     a.flush();
-    assertIncludes(a.$('#feed').textContent, 'Connected to Kick: kickstreamer');
+    assertNotIncludes(a.$('#feed').textContent, 'Connected to Kick: kickstreamer');
     assertEqual(a.api().S.kickBroadcasterId, 4242);
 
     ws.emit(JSON.stringify({
@@ -302,7 +302,7 @@ describe('app: youtube channel', () => {
 
     const resolveCall = a.fetch.callsTo('/youtube-resolve')[0];
     assertIncludes(resolveCall.url, 'q=somechannel');
-    assertIncludes(a.$('#feed').textContent, 'Connected to YouTube: somechannel');
+    assertNotIncludes(a.$('#feed').textContent, 'Connected to YouTube: somechannel');
 
     const msg = a.$('#feed .msg[data-platform="youtube"]');
     assertEqual(msg.querySelector('.m-author').dataset.user, 'YT Viewer');
@@ -866,7 +866,7 @@ describe('app: emote loading from every source', () => {
     assertEqual(native.smile.source, 'Kick Emoji');
     assertEqual(native.streamerHype.url, 'https://files.kick.com/emotes/3/fullsize');
     a.flush();
-    assertIncludes(a.$('#feed').textContent, 'Loaded 3 Kick emotes');
+    assertNotIncludes(a.$('#feed').textContent, 'Loaded 3 Kick emotes');
   });
 
   it('falls back to the server proxy for kick emotes in browser mode', async () => {
@@ -1219,7 +1219,7 @@ describe('app: kick emotes are available without being posted', () => {
     assert(a.api().S.nativeEmotes.kick.kickGlobal, 'globals should be warmed in the background');
   });
 
-  it('says so in the feed when the emote list cannot be loaded', async () => {
+  it('keeps an emote catalog failure out of the feed while chat stays joined', async () => {
     const a = await boot();
     a.click('.skip-btn');
     stubKick(a);
@@ -1228,7 +1228,8 @@ describe('app: kick emotes are available without being posted', () => {
     a.click('#jb-kick');
     await a.wait(3600);
     a.flush();
-    assertIncludes(a.$('#feed').textContent, 'could not load the channel emote list');
+    assertNotIncludes(a.$('#feed').textContent, 'could not load the channel emote list');
+    assertEqual(a.api().S.channels.kick, 'kickstreamer');
   });
 });
 

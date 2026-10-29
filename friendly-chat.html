@@ -47,13 +47,12 @@
   --link-hover: #a8bfff;
   --overlay-bg: rgba(0,0,0,0.85);
   --menu-shadow: 0 8px 32px rgba(0,0,0,0.4);
-  /* System / status rows are deliberately darker than the feed so they never
-     read as a message someone typed. */
-  --sys-bg: #060608;
-  --sys-border: #32323e;
-  --sys-text: #7a7a92;
-  --sys-label-bg: #2b2b36;
-  --sys-label-text: #9a9ab4;
+  /* Notices stay distinct from chat, with enough contrast to read comfortably. */
+  --sys-bg: #20202b;
+  --sys-border: #49495e;
+  --sys-text: #c7c7da;
+  --sys-label-bg: #383849;
+  --sys-label-text: #dddded;
   --mention-bg: rgba(124,107,255,0.28);
   --mention-text: #d3caff;
   --superchat-row: rgba(255,180,0,0.10);
@@ -301,12 +300,11 @@ html[data-animations="off"] .msg,html[data-animations="off"] .sys-msg{animation:
 .yt-badge-moderator{background:rgba(90,150,255,0.22);color:#8fb6ff;}
 .yt-badge-member{background:rgba(83,252,24,0.16);color:#8ef06a;}
 .yt-badge-verified{background:rgba(160,160,190,0.22);color:#c6c6da;}
-/* System rows: a darker, inset band with a SYSTEM tag so they can never be
-   mistaken for a message somebody typed in chat. */
-.sys-msg{margin:3px 10px;padding:5px 10px;display:flex;align-items:flex-start;gap:8px;
+/* Readable, inset notices with a tag that distinguishes them from chat. */
+.sys-msg{margin:4px 10px;padding:7px 10px;display:flex;align-items:flex-start;gap:8px;
   background:var(--sys-bg);border:1px solid var(--sys-border);border-left:3px solid var(--sys-border);
   border-radius:6px;color:var(--sys-text);font-family:'JetBrains Mono',monospace;
-  font-size:calc(var(--chat-font-size) - 2px);line-height:1.35;font-style:italic;animation:fi 0.18s ease;}
+  font-size:max(12px,calc(var(--chat-font-size) - 1px));line-height:1.5;font-style:normal;animation:fi 0.18s ease;}
 .sys-msg.hide{display:none;}
 .sys-msg:hover{border-color:var(--border2);}
 .sys-time{color:var(--sys-text);opacity:0.7;flex-shrink:0;min-width:38px;font-size:10px;font-style:normal;}
@@ -4619,10 +4617,13 @@ function updateMessageCount() {
   if(el) el.textContent = `${S.msgCount} message${S.msgCount !== 1 ? 's' : ''}`;
 }
 
-// A status line from the app itself: connection state, errors, history notes.
+// Only user-facing feedback belongs in chat. Routine transport, history and
+// emote bookkeeping must not consume rows or displace actual conversations.
 function addSys(txt) {
+  const message = String(txt ?? '').trim();
+  if(!message || /^(?:(?:Connecting|Connected) to (?:Twitch|Kick|YouTube):|Left (?:Twitch|Kick|YouTube) channel$|Load(?:ed|ing)\b.*\b(?:emotes|history messages)\b|(?:Twitch|Kick|YouTube): (?:disconnected$|connection error$|server asked us to reconnect$|reconnecting in \d+s\.{3}$|reconnect limit reached|chat service changed|could not load the channel emote list))/i.test(message)) return null;
   const el = document.createElement('div');
-  const sys = formatSystemMessage(txt);
+  const sys = formatSystemMessage(message);
   el.className = `sys-msg${sys.type === 'error' ? ' error' : ''}`;
   el.innerHTML = `<span class="sys-time">${ftime()}</span>`
     + `<span class="sys-tag">SYSTEM</span>`
@@ -4636,7 +4637,7 @@ function addSys(txt) {
 
 /**
  * A thing that happened on a platform (sub, raid, hype train, cheer, redemption).
- * Shown in the same muted style as system rows so it never looks like a user
+ * Shown in the same notice style as system rows so it never looks like a user
  * typed it, but tagged with the platform so filters still apply.
  *
  * Two halves, and they are not rendered the same way. The summary is ours and

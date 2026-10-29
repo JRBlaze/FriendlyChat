@@ -272,9 +272,91 @@ describe('render: mentions', () => {
 });
 
 describe('render: system and event rows', () => {
+  it('keeps connection, retry, history and emote diagnostics out of the feed', async () => {
+    const a = await boot();
+    a.click('.skip-btn');
+    const before = a.$('#feed').innerHTML;
+    const diagnostics = [
+      'Connecting to Twitch: room...', 'Connected to Twitch: room',
+      'Connecting to Kick: room...', 'Connected to Kick: room',
+      'Connecting to YouTube: room...', 'Connected to YouTube: room',
+      'Left Twitch channel', 'Left Kick channel', 'Left YouTube channel',
+      'Twitch: disconnected', 'Kick: disconnected',
+      'Twitch: connection error', 'Kick: connection error',
+      'Twitch: server asked us to reconnect',
+      'Twitch: reconnecting in 2s...', 'Kick: reconnecting in 4s...',
+      'YouTube: reconnect limit reached — retrying in 5 minutes',
+      'Kick: chat service changed — switching to its current connection',
+      'Loading up to 100 Twitch history messages...',
+      'Loading up to 100 Kick history messages...',
+      'Loaded 925 of your Twitch emotes (subs, follows, global)',
+      'Loaded 201 cached Kick emotes',
+      'Loaded 201 Kick emotes (71 channel, 130 global)',
+      'Loaded 45 third-party emotes (7TV/BTTV/FFZ)',
+      'Kick: could not load the channel emote list — emotes will appear as they are used',
+      '', '   ', null, undefined,
+    ];
+    for(const message of diagnostics) assertEqual(a.api().addSys(message), null);
+    a.flush();
+    assertEqual(a.$('#feed').innerHTML, before, 'diagnostics must not replace the empty state or consume feed rows');
+    assertEqual(a.api().S.msgCount, 0);
+  });
+
+  it('preserves personal notices, requested results and actionable failures', async () => {
+    const a = await boot();
+    const notices = [
+      'Twitch: Your message was not sent because you are sending messages too quickly.',
+      'Kick: could not find channel', 'Kick: could not load channel (not found)',
+      'Twitch: connection error while sending your message',
+      'Twitch: You received a gifted subscription.',
+      'Twitch: Drops are ready to claim.',
+      'YouTube: live chat ended', 'YouTube: chat unavailable (sign in required)',
+      '[TWITCH] Recent local messages from Viewer:',
+      'Update download failed: disk is full', 'Pinned message on Twitch',
+      'Loaded subscription reward',
+    ];
+    for(const message of notices) assert(a.api().addSys(message), message);
+    a.flush();
+    assertEqual(a.$$('#feed .sys-msg').length, notices.length);
+    for(const message of notices) assertIncludes(a.$('#feed').textContent, message.replace(/^\[(.*?)\]\s*|^(Twitch|Kick|YouTube):\s*/, ''));
+  });
+
+  it('keeps subscriptions, resubs, streaks and drops as platform events', async () => {
+    const a = await boot();
+    for(const platform of ['twitch', 'kick', 'youtube']) {
+      for(const notice of ['Viewer subscribed.', 'Viewer resubscribed (12 months).', 'Viewer shared a watch streak.', 'Drops are ready to claim.']) {
+        a.api().addEvent(platform, notice);
+      }
+    }
+    a.flush();
+    assertEqual(a.$$('#feed .sys-msg.event').length, 12);
+    assertEqual(a.$$('#feed button').length, 0, 'events must not invent sharing controls');
+    a.click('#fc-kick');
+    assertEqual(a.$$('#feed .sys-msg.event.hide[data-platform="kick"]').length, 4);
+  });
+
+  it('uses readable notice colors in both themes and upright, larger text', async () => {
+    const a = await boot();
+    const rules = [...a.document.styleSheets].flatMap(sheet => [...sheet.cssRules]);
+    const rule = selector => rules.find(item => item.selectorText === selector).style;
+    const luminance = hex => {
+      const channels = hex.slice(1).match(/../g).map(part => parseInt(part, 16) / 255)
+        .map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+      return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+    };
+    for(const selector of [':root', 'html[data-theme="light"]']) {
+      const style = rule(selector);
+      const bg = luminance(style.getPropertyValue('--sys-bg').trim());
+      const fg = luminance(style.getPropertyValue('--sys-text').trim());
+      assert((Math.max(bg, fg) + 0.05) / (Math.min(bg, fg) + 0.05) >= 4.5, selector + ' notice contrast');
+    }
+    assertEqual(rule('.sys-msg').getPropertyValue('font-style'), 'normal');
+    assertEqual(rule('.sys-msg').getPropertyValue('font-size'), 'max(12px,calc(var(--chat-font-size) - 1px))');
+  });
+
   it('renders system rows with a SYSTEM tag, not as a chat message', async () => {
     const a = await boot();
-    a.api().addSys('Connected to Twitch: someone');
+    a.api().addSys('Pinned message on Twitch');
     a.flush();
     const row = a.$('#feed .sys-msg');
     assert(row, 'expected a system row');
