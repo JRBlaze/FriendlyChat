@@ -433,7 +433,8 @@ describe('app improvements: connection recovery',()=> {
     assertEqual(JSON.parse(a.fetch.callsTo('/kick-connection')[0].options.body).channelId,90);
     ws.open();ws.emit(JSON.stringify({event:'pusher:connection_established',data:'{}'}));
     assertIncludes(ws.sent.join(''),'chatrooms.777.v2');assertIncludes(ws.sent.join(''),'channel.90');
-    a.flush();assertIncludes(a.$('#feed').textContent,'Connected to Kick: room');
+    a.flush();assertNotIncludes(a.$('#feed').textContent,'Connected to Kick: room');
+    assert(a.window.eval('connections.kick.connectedAt > 0'), 'the silent connection still completes successfully');
   });
   it('discards a late Kick lookup after leaving, even when no socket exists yet',async()=> {
     const a=await boot();let resolve;kick(a);
