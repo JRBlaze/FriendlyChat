@@ -747,6 +747,95 @@ describe('app: mention alerts', () => {
 });
 
 describe('app: preferences that persist', () => {
+  const settingsKey = 'friendly_chat_settings_v1';
+  const joinedKey = 'friendly_chat_last_channels_v1';
+  const video = 'https://www.youtube.com/watch?v=AbCdEfGhIjK';
+
+  it('opts in, remembers the channels still joined, and reconnects to all three on launch', async () => {
+    const a = await boot();
+    a.click('.skip-btn');
+    stubTwitchApis(a);
+    stubKick(a);
+    a.fetch.route('/youtube-chat', () => ({ messages: [], continuation: '', ended: true }));
+    await joinTwitch(a, 'oldchannel');
+    assertEqual(a.window.localStorage.getItem(joinedKey), null);
+    a.click('#settings-btn');
+    const toggle = a.$('#set-rejoin-channels');
+    assert(!toggle.checked);
+    toggle.click();
+    a.click('#settings-close');
+    assertEqual(JSON.parse(a.window.localStorage.getItem(joinedKey)).twitch, 'oldchannel');
+    a.click('#jb-twitch');
+    assertEqual(JSON.parse(a.window.localStorage.getItem(joinedKey)).twitch, null);
+    await joinTwitch(a, 'newchannel');
+    a.type('#ci-kick', 'kickchannel');
+    a.click('#jb-kick');
+    a.type('#ci-youtube', video);
+    a.click('#jb-youtube');
+    await a.tick(3);
+    const storage = {
+      [settingsKey]: a.window.localStorage.getItem(settingsKey),
+      [joinedKey]: a.window.localStorage.getItem(joinedKey),
+    };
+    const b = await boot({ storage, routes: [
+      ['kick.com/api/v1/channels/', () => KICK_CHANNEL],
+      ['/youtube-chat', () => ({ messages: [], continuation: '', ended: true })],
+    ] });
+    await b.tick(4);
+    assertEqual(b.api().S.channels, { twitch: 'newchannel', kick: 'kickchannel', youtube: video });
+    assertEqual(b.api().S.youtube.videoId, 'AbCdEfGhIjK');
+    assert(b.$('#oauth-overlay').classList.contains('hidden'));
+    assert(b.fetch.callsTo('kick.com/api/v1/channels/kickchannel').length);
+    for(const platform of ['twitch','kick','youtube']) assertEqual(b.$('#jb-'+platform).textContent, 'Leave');
+    b.click('#settings-btn');
+    assert(b.$('#set-rejoin-channels').checked);
+    b.$('#set-rejoin-channels').click();
+    const c = await boot({ storage: { ...storage, [settingsKey]: b.window.localStorage.getItem(settingsKey) } });
+    assertEqual(c.api().S.channels, { twitch: null, kick: null, youtube: null });
+  });
+
+  it('ignores empty, corrupt, and invalid saved channels and preserves channels already joined', async () => {
+    const enabled = JSON.stringify({ rejoinChannels: true });
+    for(const record of [undefined, 'broken JSON', '{"twitch":null,"kick":7,"youtube":" "}']) {
+      const storage = { [settingsKey]: enabled };
+      if(record !== undefined) storage[joinedKey] = record;
+      const a = await boot({ storage });
+      assertEqual(a.api().S.channels, { twitch: null, kick: null, youtube: null });
+      assert(!a.$('#oauth-overlay').classList.contains('hidden'));
+    }
+    const a = await boot({storage:{[settingsKey]:enabled}});
+    a.api().S.channels.twitch = 'current';
+    a.window.localStorage.setItem(joinedKey, '{"twitch":"older"}');
+    a.window.eval('restoreJoinedChannels()');
+    assertEqual(a.api().S.channels.twitch,'current');
+    a.window.eval("Storage.prototype.setItem = () => { throw Error('storage unavailable'); }");
+    a.window.eval('saveJoinedChannels()');
+  });
+
+  it('reconnects Kick with the restored account after its identity arrives', async () => {
+    let completeIdentity;
+    const a = await boot({ storage: {
+      [settingsKey]: JSON.stringify({ rejoinChannels: true }),
+      [joinedKey]: '{"kick":"room"}',
+      kick_refresh_token: 'refresh',
+      kick_access_token: 'token',
+      kick_token_expiry: String(Date.now() + 600000),
+    }, routes: [
+      ['api.kick.com/public/v1/users', () => new Promise(resolve => { completeIdentity = resolve; })],
+      ['kick.com/api/v1/channels/room', () => KICK_CHANNEL],
+    ] });
+    assertEqual(a.api().S.channels.kick, 'room');
+    assert(!a.api().S.canModerate.kick);
+    completeIdentity({ data: [{ name: 'room' }] });
+    await a.tick(4);
+    assert(a.api().S.canModerate.kick);
+    assertEqual(a.fetch.callsTo('kick.com/api/v1/channels/room').length, 2);
+    a.fetch.route('api.kick.com/public/v1/users', () => ({ data: [{ name: 'stale' }] }));
+    a.window.eval("fetchDisplayName('kick','old-token')");
+    await a.tick(2);
+    assertEqual(a.api().S.kickUserLogin, 'room');
+  });
+
   it('saves and restores the font size', async () => {
     const a = await boot();
     a.click('.skip-btn');
