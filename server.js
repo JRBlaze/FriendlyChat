@@ -236,7 +236,7 @@ function start(CFG = {}) {
     // ── /kick-mod — uses user's own access token, no secret needed ───────────
     if(pathname === '/kick-mod' && req.method === 'POST') {
       try {
-        const { token, broadcasterId, action, username, duration, messageId } = await readBody(req);
+        const { token, broadcasterId, action, username, duration, messageId, reason, userId } = await readBody(req);
         if(!features.validModeration(action, duration)) {
           sendJson(400, { error: 'Unsupported moderation action or duration' });
           return;
@@ -257,8 +257,9 @@ function start(CFG = {}) {
         }
 
         // Resolve user_id from username when needed.
-        let targetUserId = null;
-        if(username) {
+        const chatUserId = Number(userId);
+        let targetUserId = Number.isSafeInteger(chatUserId) && chatUserId > 0 ? chatUserId : null;
+        if(!targetUserId && username) {
           const channelLookup = await fetch(`https://kick.com/api/v1/channels/${encodeURIComponent(username)}`);
           if(channelLookup.ok) {
             const channelData = await channelLookup.json().catch(() => ({}));
@@ -269,6 +270,7 @@ function start(CFG = {}) {
         // Kick moderation API accepts duration in minutes for timeout.
         const timeoutMinutes = Math.max(1, Math.ceil((Number(duration) || 0) / 60));
         const modBody = { broadcaster_user_id: Number(broadcasterId) };
+        if(reason && action !== 'unban') modBody.reason = reason;
         if(targetUserId) modBody.user_id = targetUserId;
         if(action === 'timeout') modBody.duration = timeoutMinutes;
         if(!modBody.user_id) {
