@@ -730,6 +730,13 @@ html[data-theme="light"] .msg.action .m-body[style*="--author-light"]{color:var(
     </div>
 
     <div class="settings-section">
+      <h3>Channels</h3>
+      <div class="setting-row">
+        <label for="set-rejoin-channels">Rejoin channels on startup<small>Open the Twitch, Kick, and YouTube chats you were watching when Friendly Chat closed.</small></label>
+        <input type="checkbox" id="set-rejoin-channels">
+      </div>
+    </div>
+    <div class="settings-section">
       <h3>Emotes</h3>
       <div class="setting-row">
         <label for="set-quick-emotes">Quick access emote bar<small>Show up to eight recently sent emotes.</small></label>
@@ -897,6 +904,7 @@ const MAX_MESSAGES_DEFAULT = 500;
 const MAX_MESSAGES_MIN = 200;
 const MAX_MESSAGES_MAX = 5000;
 const SETTINGS_KEY = 'friendly_chat_settings_v1';
+const LAST_CHANNELS_KEY = 'friendly_chat_last_channels_v1';
 const MULTI_JOIN_KEY = 'multi_join_platforms_v1';
 
 // ALL_PLATFORMS must be defined before S.filter and S.target are initialized.
@@ -963,6 +971,7 @@ function loadSettings() {
     extraNicknames: typeof stored.extraNicknames === 'string' ? stored.extraNicknames : '',
     maxMessages:    clampNumber(stored.maxMessages, MAX_MESSAGES_MIN, MAX_MESSAGES_MAX, MAX_MESSAGES_DEFAULT),
     animations:     stored.animations !== undefined ? !!stored.animations : DEFAULT_SETTINGS.animations,
+    rejoinChannels: stored.rejoinChannels === true,
     autoUpdateCheck: stored.autoUpdateCheck !== undefined ? !!stored.autoUpdateCheck : DEFAULT_SETTINGS.autoUpdateCheck,
     skippedVersion: typeof stored.skippedVersion === 'string' ? stored.skippedVersion : '',
   };
@@ -1529,6 +1538,7 @@ loadConfig().then(() => {
   restoreTwitchSession();
   restoreKickSession();
   maybeSkipConnectPrompt();
+  restoreJoinedChannels();
 });
 
 // If a session is already stored there is nothing to do on the connect screen,
@@ -1852,7 +1862,11 @@ function fetchDisplayName(p, token) {
     .then(r => r.ok ? r.json() : null)
     .then(d => {
       const name = d?.data?.[0]?.name || d?.data?.[0]?.username;
-      if(name) { if(statusEl) statusEl.textContent = `Connected as ${name}`; S.kickUserLogin = name; }
+      if(name && S.tokens.kick === token) {
+        if(statusEl) statusEl.textContent = `Connected as ${name}`;
+        S.kickUserLogin = name;
+        if(S.channels.kick) connectKick(S.channels.kick);
+      }
     })
     .catch(() => {});
   }
@@ -2535,6 +2549,26 @@ function openRecentChannel(platform, channel) {
   if(S.channels[platform]) leaveCh(platform);
   joinCh(platform);
 }
+function saveJoinedChannels() {
+  if(!settings.rejoinChannels) return;
+  try { localStorage.setItem(LAST_CHANNELS_KEY, JSON.stringify(S.channels)); } catch(_) {}
+}
+
+function restoreJoinedChannels() {
+  if(!settings.rejoinChannels) return;
+  let channels;
+  try { channels = JSON.parse(localStorage.getItem(LAST_CHANNELS_KEY)); } catch(_) { return; }
+  let rejoined = false;
+  for(const platform of ALL_PLATFORMS) {
+    const saved = channels?.[platform];
+    if(S.channels[platform] || typeof saved !== 'string' || !saved.trim()) continue;
+    document.getElementById(`ci-${platform}`).value = saved;
+    joinCh(platform);
+    rejoined = true;
+  }
+  if(rejoined) dismiss();
+}
+
 function joinCh(p) {
   const input = document.getElementById(`ci-${p}`);
   const ch = normalizeChannelFor(p, input.value);
@@ -2542,6 +2576,7 @@ function joinCh(p) {
   if(S.channels[p] === ch) { showToast(`Already watching ${ch} on ${CFG[p].name}`); return; }
 
   S.channels[p] = ch;
+  saveJoinedChannels();
   rememberRecentChannel(p, ch);
   document.getElementById(`cw-${p}`).classList.add(`act-${p}`);
   const btn = document.getElementById(`jb-${p}`);
@@ -2577,6 +2612,7 @@ async function connectYouTube(channel) {
 
 function leaveCh(p) {
   S.channels[p] = null;
+  saveJoinedChannels();
   if(connections[p]) stopConnection(p);
   setCanModerate(p, false);
   if(S.sockets[p]) { try { S.sockets[p].close(); } catch(e){} S.sockets[p] = null; }
@@ -6023,6 +6059,7 @@ function syncSettingsForm() {
   document.getElementById('set-nicknames').value        = settings.extraNicknames;
   document.getElementById('set-max-messages').value     = settings.maxMessages;
   document.getElementById('set-quick-emotes').checked   = settings.showQuickEmotes;
+  document.getElementById('set-rejoin-channels').checked = settings.rejoinChannels;
   document.getElementById('set-animations').checked     = settings.animations;
   document.getElementById('set-auto-update').checked    = settings.autoUpdateCheck;
   describeUpdateState();
@@ -6054,6 +6091,11 @@ function closeSettings() {
 }
 
 document.getElementById('settings-btn').addEventListener('click', openSettings);
+document.getElementById('set-rejoin-channels').addEventListener('change', e => {
+  settings.rejoinChannels = e.target.checked;
+  saveSettings();
+  saveJoinedChannels();
+});
 if(window.electronAPI?.alwaysOnTop) {
   const toggle = document.getElementById('always-on-top');
   toggle.hidden = false;
