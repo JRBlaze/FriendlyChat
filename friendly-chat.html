@@ -474,6 +474,8 @@ html[data-theme="light"] .msg.action .m-body[style*="--author-light"]{color:var(
 .settings-status.warn{color:#ffb400;}
 .icon-btn{display:flex;align-items:center;gap:7px;padding:6px 12px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);cursor:pointer;font-size:12px;font-family:'DM Sans',sans-serif;color:var(--text-muted);transition:all 0.15s;flex-shrink:0;}
 .icon-btn:hover{border-color:var(--border2);color:var(--text);}
+.icon-btn[aria-pressed="true"]{border-color:var(--accent);color:var(--text);}
+#always-on-top[hidden]{display:none;}
 
 /* User action menu */
 .user-menu{position:fixed;background:var(--surface);border:1px solid var(--border2);border-radius:10px;min-width:180px;z-index:300;overflow:hidden;box-shadow:var(--menu-shadow);}
@@ -576,6 +578,7 @@ html[data-theme="light"] .msg.action .m-body[style*="--author-light"]{color:var(
         </select>
       </label>
       <button class="icon-btn" id="settings-btn" title="Notification and performance settings">⚙ Settings</button>
+      <button type="button" class="icon-btn" id="always-on-top" aria-pressed="false" hidden disabled>Always on top</button>
       <button class="youtube-toggle" id="youtube-toggle">YOUTUBE PANEL</button>
       <button class="acc-btn" id="accounts-btn">
         <div class="acc-dots">
@@ -6051,6 +6054,23 @@ function closeSettings() {
 }
 
 document.getElementById('settings-btn').addEventListener('click', openSettings);
+if(window.electronAPI?.alwaysOnTop) {
+  const toggle = document.getElementById('always-on-top');
+  toggle.hidden = false;
+  const apply = async enabled => {
+    toggle.disabled = true;
+    try {
+      const pinned = await window.electronAPI.alwaysOnTop(enabled);
+      toggle.setAttribute('aria-pressed', String(pinned === true));
+    } catch {
+      showToast('Could not update Always on top');
+    } finally {
+      toggle.disabled = false;
+    }
+  };
+  apply();
+  toggle.addEventListener('click', () => apply(toggle.getAttribute('aria-pressed') !== 'true'));
+}
 document.getElementById('settings-close').addEventListener('click', closeSettings);
 document.getElementById('settings-overlay').addEventListener('click', e => {
   if(e.target.id === 'settings-overlay') closeSettings();

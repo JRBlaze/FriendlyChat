@@ -1,6 +1,6 @@
 // Offline smoke of the real original Electron preload and renderer, including
 // responsive emote geometry. Run with Electron, not Node. No platform actions.
-const {app,BrowserWindow,session}=require('electron');
+const {app,BrowserWindow,ipcMain,session}=require('electron');
 const fs=require('node:fs');
 const path=require('node:path');
 const os=require('node:os');
@@ -18,7 +18,17 @@ app.whenReady().then(async()=> {
   server=require(path.join(root,'server.js')).start({port:18591,twitch:{client_id:'fixture'}});
   if(!server.listening) await new Promise(resolve=>server.once('listening',resolve));
   window=new BrowserWindow({show:false,width:1280,height:800,webPreferences:{backgroundThrottling:false,nodeIntegration:false,contextIsolation:true,preload:path.join(root,'preload.js')}});
+  ipcMain.handle('window-always-on-top', (_event, enabled)=>{
+    if(typeof enabled==='boolean') window.setAlwaysOnTop(enabled);
+    return window.isAlwaysOnTop();
+  });
   await window.loadURL('http://localhost:18591/friendly-chat.html');
+  for(const expected of [true,false]) {
+    await window.webContents.executeJavaScript("document.getElementById('always-on-top').click()");
+    await pause(100);
+    assert.equal(window.isAlwaysOnTop(),expected);
+    assert.equal(await window.webContents.executeJavaScript("document.getElementById('always-on-top').getAttribute('aria-pressed')"),String(expected));
+  }
   await window.webContents.executeJavaScript(`
     document.querySelector('.skip-btn').click();
     const stablePaint=document.createElement('style');
@@ -64,11 +74,12 @@ app.whenReady().then(async()=> {
       const expanded=height(controls), topHeight=height(topRow);
       summary.click();
       const collapsed=height(controls), sameTop=height(topRow)===topHeight;
+      const summaryHeight=height(summary);
       summary.click();
-      return {expanded,collapsed,sameTop,reopened:height(controls)===expanded};
+      return {expanded,collapsed,summaryHeight,sameTop,reopened:height(controls)===expanded};
     })()`);
     assert(channelControls.collapsed<channelControls.expanded && channelControls.sameTop && channelControls.reopened);
-    if(width===520) assert(channelControls.expanded-channelControls.collapsed>80,'collapse should reclaim the stacked controls at narrow widths');
+    assert.equal(channelControls.collapsed,channelControls.summaryHeight,'collapsed controls occupy only the summary height');
   }
   await window.webContents.executeJavaScript(`document.getElementById('settings-btn').click();document.getElementById('set-quick-emotes').click();`);
   assert(await window.webContents.executeJavaScript(`document.getElementById('quick-emotes').hidden`));

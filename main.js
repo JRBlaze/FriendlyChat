@@ -292,6 +292,12 @@ async function resolveYouTubeLiveViaWindow(query) {
 // ── Window ────────────────────────────────────────────────────────────────────
 let mainWindow;
 
+ipcMain.handle('window-always-on-top', (event, enabled) => {
+  if(!mainWindow || event.sender !== mainWindow.webContents) return;
+  if(typeof enabled === 'boolean') mainWindow.setAlwaysOnTop(enabled);
+  return mainWindow.isAlwaysOnTop();
+});
+
 function getLinuxAppIcon() {
   if(process.platform !== 'linux') return undefined;
 
@@ -329,6 +335,7 @@ function readWindowBounds(statePath) {
   const height = Math.max(MIN_WINDOW_HEIGHT, Math.min(bounds.height, workArea.height));
   return {
     width, height,
+    alwaysOnTop: bounds.alwaysOnTop === true,
     x: Math.max(workArea.x, Math.min(bounds.x, workArea.x + workArea.width - width)),
     y: Math.max(workArea.y, Math.min(bounds.y, workArea.y + workArea.height - height)),
   };
@@ -386,7 +393,8 @@ function createWindow() {
 
   mainWindow.on('close', () => {
     try {
-      fs.writeFileSync(statePath + '.tmp', JSON.stringify(mainWindow.getNormalBounds()));
+      const state = { ...mainWindow.getNormalBounds(), alwaysOnTop: mainWindow.isAlwaysOnTop() };
+      fs.writeFileSync(statePath + '.tmp', JSON.stringify(state));
       fs.renameSync(statePath + '.tmp', statePath);
     } catch(error) {
       console.warn('Could not save window bounds:', error.message);

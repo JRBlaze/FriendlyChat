@@ -134,6 +134,39 @@ describe('app improvements: composer moderation commands',()=> {
 });
 
 describe('app improvements: original interface and emote controls',()=> {
+  it('shows the desktop toolbar toggle, syncs it, and keeps its state after an IPC error',async()=> {
+    let pinned=true, reject=false;
+    const calls=[];
+    const a=await boot({electronAPI:{async alwaysOnTop(enabled) {
+      calls.push(enabled);
+      if(reject) throw Error('IPC failed');
+      if(enabled!==undefined) pinned=enabled;
+      return pinned;
+    }}});
+    const toggle=a.$('.topbar-row #always-on-top');
+    assert(!toggle.hidden);
+    assertEqual(toggle.getAttribute('aria-pressed'),'true');
+    assert(!toggle.disabled);
+    toggle.click();
+    assert(toggle.disabled);
+    await a.tick();
+    assertEqual(toggle.getAttribute('aria-pressed'),'false');
+    assert(!pinned);
+    reject=true;
+    toggle.click();
+    await a.tick();
+    assertEqual(toggle.getAttribute('aria-pressed'),'false');
+    assert(!toggle.disabled);
+    reject=false;
+    toggle.click();
+    await a.tick();
+    assertEqual(toggle.getAttribute('aria-pressed'),'true');
+    assertEqual(calls,[undefined,false,true,true]);
+    assertIncludes(a.document.body.textContent,'Could not update Always on top');
+    const browser=await boot();
+    assert(browser.$('#always-on-top').hidden);
+    assertEqual(browser.window.getComputedStyle(browser.$('#always-on-top')).display,'none');
+  });
   it('keeps identical Twitch/Kick emote names distinct and previews the actual selected image',async()=> {
     const a=await boot(),S=auth(a);
     S.nativeEmotes.twitch={Same:emote({url:'https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/2.0'})};
