@@ -108,6 +108,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .oauth-header h2{font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:600;letter-spacing:0.04em;color:var(--text);margin-bottom:6px;}
 .oauth-header p{font-size:13px;color:var(--text-muted);line-height:1.5;}
 .oauth-platforms{padding:20px 28px;display:flex;flex-direction:column;gap:10px;}
+.oauth-notice{padding:0 4px;color:var(--text-muted);font-size:12px;line-height:1.5;}
 .oauth-row{display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:12px;border:1px solid var(--border);background:var(--surface2);transition:border-color 0.2s,background 0.2s;}
 .oauth-row.conn-twitch{border-color:var(--twitch-border);background:var(--twitch-dim);}
 .oauth-row.conn-kick{border-color:var(--kick-border);background:var(--kick-dim);}
@@ -137,6 +138,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 #main-app.hidden{display:none;}
 .topbar{background:var(--surface);border-bottom:1px solid var(--border);display:flex;flex-direction:column;padding:8px 14px;gap:8px;flex-shrink:0;}
 .topbar-row{display:flex;align-items:center;gap:10px;min-width:0;flex-wrap:wrap;}
+.channel-controls > summary{width:fit-content;cursor:pointer;color:var(--text-muted);font-size:12px;}
+.channel-controls[open] > summary{margin-bottom:6px;}
 .app-logo{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;letter-spacing:0.06em;display:flex;align-items:center;gap:8px;flex-shrink:0;}
 .app-version{font-size:10px;font-weight:600;letter-spacing:0.04em;color:var(--text-dim);background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:2px 7px;}
 .app-version:empty{display:none;}
@@ -535,6 +538,7 @@ html[data-theme="light"] .msg.action .m-body[style*="--author-light"]{color:var(
         <div class="status-dot off" id="sd-twitch"></div>
         <button class="conn-btn twitch-c" id="btn-twitch" onclick="startOAuth('twitch')">Connect</button>
       </div>
+      <p id="twitch-moderator-notice" class="oauth-notice" role="status" hidden>Twitch channel owners can now use /mod and /unmod in Friendly Chat. Disconnect and reconnect Twitch in Accounts to grant the new permission.</p>
       <div class="oauth-row" id="row-kick">
         <div class="plat-icon kick">KI</div>
         <div class="plat-info"><strong>Kick</strong><small id="st-kick">Not connected</small></div>
@@ -582,7 +586,8 @@ html[data-theme="light"] .msg.action .m-body[style*="--author-light"]{color:var(
         <span>Accounts</span>
       </button>
     </div>
-    <div class="topbar-row">
+    <details class="channel-controls" open>
+      <summary>Channel controls</summary>
       <div class="ch-inputs">
         <div class="ch-wrap" id="cw-twitch">
           <span class="plat-tag twitch">TWITCH</span>
@@ -603,7 +608,7 @@ html[data-theme="light"] .msg.action .m-body[style*="--author-light"]{color:var(
           <button class="join-btn" id="jb-youtube">Join</button>
         </div>
       </div>
-    </div>
+    </details>
   </div>
   <div class="app-body">
     <div class="chat-col">
@@ -796,7 +801,7 @@ async function loadConfig(retries = 5, delayMs = 800) {
         hasKickClientId: !!KICK_CLIENT_ID_PUB,
         hasTwitchClientId: !!TWITCH_CLIENT_ID
       });
-      CFG.twitch.url = `https://id.twitch.tv/oauth2/authorize?client_id=${TWITCH_CLIENT_ID}&scope=chat%3Aread+chat%3Aedit+user%3Awrite%3Achat+moderator%3Amanage%3Abanned_users+moderator%3Amanage%3Achat_messages+moderator%3Aread%3Afollowers+user%3Aread%3Aemotes&response_type=token`;
+      CFG.twitch.url = `https://id.twitch.tv/oauth2/authorize?client_id=${TWITCH_CLIENT_ID}&scope=chat%3Aread+chat%3Aedit+user%3Awrite%3Achat+moderator%3Amanage%3Abanned_users+moderator%3Amanage%3Achat_messages+moderator%3Aread%3Afollowers+user%3Aread%3Aemotes+channel%3Amanage%3Amoderators&response_type=token`;
       return;
     } catch(e) {
       dbg('config', `Attempt ${attempt} failed`, e.message);
@@ -1577,9 +1582,16 @@ async function validateTwitchSession(token, restore = false) {
     }
     if(!response.ok) { if(restore) markConnected('twitch', token); return; }
     const data = await response.json();
+    if(restore ? localStorage.getItem('twitch_access_token') !== token : S.tokens.twitch !== token) return;
     if(data.client_id) {
       if(restore) markConnected('twitch', token);
-      else await fetchTwitchUserEmotes();
+      if(Array.isArray(data.scopes)) {
+        const notice = document.getElementById('twitch-moderator-notice');
+        const needsPermission = !data.scopes.includes('channel:manage:moderators');
+        if(needsPermission && notice.hidden) addSys('Twitch: Disconnect and reconnect in Accounts to enable /mod and /unmod for your own channel.');
+        notice.hidden = !needsPermission;
+      }
+      if(!restore) await fetchTwitchUserEmotes();
     }
   } catch(_) { if(restore && localStorage.getItem('twitch_access_token') === token) markConnected('twitch', token); }
 }
@@ -1852,6 +1864,7 @@ function extractClientId(url) {
 function disconnectPlatform(p) {
   S.auth[p] = false;
   S.tokens[p] = null;
+  if(p === 'twitch') document.getElementById('twitch-moderator-notice').hidden = true;
   setCanModerate(p, false);
   if(p === 'kick') {
     localStorage.removeItem('kick_refresh_token');
@@ -2883,7 +2896,7 @@ function formatKickEventSummary(eventName, payload = {}) {
   // Housekeeping events are not worth a row in the feed: they are bookkeeping
   // the socket does for the site's own widgets, and each one that gets through
   // reads as "Someone triggered ChatroomUpdated" over and over.
-  if(/Updated|Statistic|Leaderboard|Livestream|Pinned|Deleted|Banned/i.test(shortName)) return '';
+  if(/Updated|Statistic|Leaderboard|Livestream|Pinned|Deleted|Banned|^StopStreamBroadcast$|^StreamEnded$/i.test(shortName)) return '';
   return `${sender} triggered ${shortName}.`;
 }
 
@@ -5616,10 +5629,18 @@ function modTwitchCustomTimeout(username) {
   modTwitch('timeout', username, seconds);
 }
 
-async function modTwitch(action, username, duration, selectedMessageId) {
-  if(!ChatFeatures.validModeration(action, duration)) { addSys('Unsupported moderation action or duration'); return; }
+async function modTwitch(action, username, duration, selectedMessageId, reason) {
+  const changesRole = action === 'mod' || action === 'unmod';
+  if(!changesRole && !ChatFeatures.validModeration(action, duration)) { addSys('Unsupported moderation action or duration'); return; }
   const token    = S.tokens.twitch;
   const clientId = extractClientId(CFG.twitch.url);
+  const broadcasterId = S.twitchBroadcasterId;
+  const moderatorId = S.twitchUserId;
+  const epoch = connections.twitch.epoch;
+  if(changesRole && (!broadcasterId || broadcasterId !== moderatorId)) {
+    addSys('Twitch: only the channel owner can add or remove moderators');
+    return;
+  }
   if(!S.canModerate.twitch) {
     addSys('Twitch: moderation actions are only available to moderators/broadcaster');
     return;
@@ -5635,14 +5656,31 @@ async function modTwitch(action, username, duration, selectedMessageId) {
       headers: { 'Authorization': `Bearer ${token}`, 'Client-Id': clientId }
     });
     const uData = await uRes.json();
+    if(connections.twitch.epoch !== epoch || S.tokens.twitch !== token) return;
     const userId = uData.data?.[0]?.id;
     if(!userId) { addSys(`Twitch: user "${username}" not found`); return; }
 
-    if(action === 'ban') {
+    if(changesRole) {
+      const query = new URLSearchParams({ broadcaster_id: broadcasterId, user_id: userId });
+      const res = await fetch(`https://api.twitch.tv/helix/moderation/moderators?${query}`, {
+        method: action === 'mod' ? 'POST' : 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}`, 'Client-Id': clientId },
+      });
+      if(res.status === 401) {
+        addSys('Twitch: reconnect your account to authorize moderator role changes');
+        return;
+      }
+      if(!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        addSys(`Twitch ${action} error: ${error.message || res.status}`);
+        return;
+      }
+      addSys(`Twitch: ${action === 'mod' ? 'Added' : 'Removed'} ${username} as a moderator`);
+    } else if(action === 'ban') {
       const res = await fetch(`https://api.twitch.tv/helix/moderation/bans?broadcaster_id=${S.twitchBroadcasterId}&moderator_id=${S.twitchUserId}`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Client-Id': clientId, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: { user_id: userId } }),
+        body: JSON.stringify({ data: { user_id: userId, reason } }),
       });
       const d = await res.json();
       if(!res.ok) { addSys(`Twitch ban error: ${d.message || res.status}`); return; }
@@ -5652,7 +5690,7 @@ async function modTwitch(action, username, duration, selectedMessageId) {
       const res = await fetch(`https://api.twitch.tv/helix/moderation/bans?broadcaster_id=${S.twitchBroadcasterId}&moderator_id=${S.twitchUserId}`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Client-Id': clientId, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: { user_id: userId, duration } }),
+        body: JSON.stringify({ data: { user_id: userId, duration, reason } }),
       });
       const d = await res.json();
       if(!res.ok) { addSys(`Twitch timeout error: ${d.message || res.status}`); return; }
@@ -5698,7 +5736,7 @@ function modKickCustomTimeout(username) {
   modKick('timeout', username, seconds);
 }
 
-async function modKick(action, username, duration, selectedMessageId) {
+async function modKick(action, username, duration, selectedMessageId, reason) {
   if(!ChatFeatures.validModeration(action, duration)) { addSys('Unsupported moderation action or duration'); return; }
   const token       = S.tokens.kick;
   const broadcasterId = S.kickBroadcasterId;
@@ -5707,6 +5745,8 @@ async function modKick(action, username, duration, selectedMessageId) {
 
   try {
     if(action === 'ban' || action === 'timeout' || action === 'unban') {
+      const chatter = [...document.querySelectorAll('.m-author.kick[data-user-id]')]
+        .reverse().find(author => author.dataset.user.toLowerCase() === username.toLowerCase());
       const body = action === 'ban'
         ? { username, permanent: true }
         : action === 'unban'
@@ -5716,7 +5756,7 @@ async function modKick(action, username, duration, selectedMessageId) {
       const res = await fetch('/kick-mod', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ token, broadcasterId, action, ...body })
+        body:    JSON.stringify({ token, broadcasterId, action, reason, userId: chatter?.dataset.userId, ...body })
       });
       const d = await res.json();
       if(!res.ok) { addSys(`Kick mod error: ${d.error || res.status}`); return; }
@@ -5746,15 +5786,45 @@ async function modKick(action, username, duration, selectedMessageId) {
   }
 }
 
+function sendModerationCommand(text, selected) {
+  const [command, target, ...args] = text.split(/\s+/);
+  let action = command.slice(1).toLowerCase();
+  if(!['mod','unmod','ban','timeout','unban','untimeout'].includes(action)) return false;
+  if(selected.length !== 1) {
+    addSys('Select exactly one connected Twitch or Kick channel to run a moderation command.');
+    return true;
+  }
+  const [platform] = selected;
+  const username = target?.replace(/^@/, '');
+  const seconds = action === 'timeout' ? Number(args.shift() ?? 600) : undefined;
+  const reason = args.join(' ');
+  if(!username || !/^[a-z0-9_]+$/i.test(username)
+    || (action === 'timeout' && !ChatFeatures.validModeration(action, seconds))
+    || reason.length > (platform === 'kick' ? 100 : 500)
+    || (reason && !['ban','timeout'].includes(action))) {
+    addSys(`Usage: /${action} username${action === 'timeout' ? ' [seconds] [reason]' : action === 'ban' ? ' [reason]' : ''}`);
+    return true;
+  }
+  if(action === 'untimeout') action = 'unban';
+  if(platform === 'twitch') modTwitch(action, username, seconds, undefined, reason || undefined);
+  else if(action === 'mod' || action === 'unmod') {
+    addSys('Kick: use this command in Kick chat or manage moderators in the Kick Creator Dashboard.');
+  } else if(action === 'timeout' && seconds > 604800) {
+    addSys('Kick: timeouts can last up to 604800 seconds (7 days).');
+  } else modKick(action, username, seconds, undefined, reason || undefined);
+  return true;
+}
+
 function sendMsg() {
   const input = document.getElementById('send-input');
   const text = input.value.trim(); if(!text) return;
 
   // Send to all selected platforms that are authenticated and have a channel joined
   const selected = SEND_PLATFORMS.filter(p => S.target.has(p) && S.auth[p] && S.channels[p]);
-  const targets = ChatFeatures.destinations(text, selected, allEmoteEntries({ includeUnavailable:true }));
+  const command = text.startsWith('/') && sendModerationCommand(text, selected);
+  const targets = command ? selected : ChatFeatures.destinations(text, selected, allEmoteEntries({ includeUnavailable:true }));
 
-  if(!targets.length){
+  if(!command && !targets.length){
     showToast(S.channels.youtube && !S.channels.twitch && !S.channels.kick
       ? 'YouTube messages are sent from the YouTube panel'
       : 'No connected channels selected to send to');
@@ -5766,7 +5836,7 @@ function sendMsg() {
   recallIndex = -1;
   input.value = '';
   closeAutocomplete();
-  targets.forEach(p => sendToPlatform(p, text));
+  if(!command) targets.forEach(p => sendToPlatform(p, text));
   // One send, one thread. The next message is a new message unless the viewer
   // asks to reply again.
   pendingReply = null;

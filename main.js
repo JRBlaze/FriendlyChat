@@ -1,6 +1,6 @@
 // Friendly Chat - Electron Main Process
 
-const { app, BrowserWindow, shell, ipcMain, nativeImage } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, nativeImage, screen } = require('electron');
 const path = require('path');
 const fs   = require('fs');
 const os   = require('os');
@@ -311,9 +311,34 @@ function getLinuxAppIcon() {
   return undefined;
 }
 
+const MIN_WINDOW_WIDTH = 520;
+const MIN_WINDOW_HEIGHT = 600;
+
+function readWindowBounds(statePath) {
+  let bounds;
+  try {
+    bounds = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  } catch {
+    return {};
+  }
+  if(!bounds || ![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isSafeInteger)) return {};
+  if(bounds.width < MIN_WINDOW_WIDTH || bounds.height < MIN_WINDOW_HEIGHT) return {};
+
+  const { workArea } = screen.getDisplayMatching(bounds);
+  const width = Math.max(MIN_WINDOW_WIDTH, Math.min(bounds.width, workArea.width));
+  const height = Math.max(MIN_WINDOW_HEIGHT, Math.min(bounds.height, workArea.height));
+  return {
+    width, height,
+    x: Math.max(workArea.x, Math.min(bounds.x, workArea.x + workArea.width - width)),
+    y: Math.max(workArea.y, Math.min(bounds.y, workArea.y + workArea.height - height)),
+  };
+}
+
 function createWindow() {
+  const statePath = path.join(app.getPath('userData'), 'window-state.json');
   mainWindow = new BrowserWindow({
-    width: 1280, height: 800, minWidth: 520, minHeight: 600,
+    width: 1280, height: 800, minWidth: MIN_WINDOW_WIDTH, minHeight: MIN_WINDOW_HEIGHT,
+    ...readWindowBounds(statePath),
     title: 'Friendly Chat',
     icon: getLinuxAppIcon(),
     webPreferences: {
@@ -359,6 +384,14 @@ function createWindow() {
     return { action: 'deny' };
   });
 
+  mainWindow.on('close', () => {
+    try {
+      fs.writeFileSync(statePath + '.tmp', JSON.stringify(mainWindow.getNormalBounds()));
+      fs.renameSync(statePath + '.tmp', statePath);
+    } catch(error) {
+      console.warn('Could not save window bounds:', error.message);
+    }
+  });
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 

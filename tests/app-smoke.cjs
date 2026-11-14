@@ -56,6 +56,19 @@ app.whenReady().then(async()=> {
     assert.equal(geometry.node,'undefined');assert.equal(geometry.extension,'undefined');
     assert.equal(geometry.notices.length,3);
     assert(geometry.notices.every(row=>row.scroll<=row.width+1&&parseFloat(row.font)>=12&&row.style==='normal'),'notice geometry and readability');
+    const channelControls=await window.webContents.executeJavaScript(`(()=>{
+      const controls=document.querySelector('.channel-controls');
+      const summary=controls.querySelector('summary');
+      const topRow=document.querySelector('.topbar-row');
+      const height=el=>el.getBoundingClientRect().height;
+      const expanded=height(controls), topHeight=height(topRow);
+      summary.click();
+      const collapsed=height(controls), sameTop=height(topRow)===topHeight;
+      summary.click();
+      return {expanded,collapsed,sameTop,reopened:height(controls)===expanded};
+    })()`);
+    assert(channelControls.collapsed<channelControls.expanded && channelControls.sameTop && channelControls.reopened);
+    if(width===520) assert(channelControls.expanded-channelControls.collapsed>80,'collapse should reclaim the stacked controls at narrow widths');
   }
   await window.webContents.executeJavaScript(`document.getElementById('settings-btn').click();document.getElementById('set-quick-emotes').click();`);
   assert(await window.webContents.executeJavaScript(`document.getElementById('quick-emotes').hidden`));

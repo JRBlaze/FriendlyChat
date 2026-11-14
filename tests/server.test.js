@@ -299,6 +299,26 @@ describe('server: kick endpoints', () => {
     });
   });
 
+  it('uses a Kick chatter ID directly and forwards the timeout reason', async () => {
+    let calls = 0;
+    stubFetch(async (url, options) => {
+      calls++;
+      assertIncludes(url, '/moderation/bans');
+      assertEqual(JSON.parse(options.body), {
+        broadcaster_user_id: 5, reason: 'Spam', user_id: 777, duration: 2,
+      });
+      return jsonResult({});
+    });
+    await withServer({}, async port => {
+      const res = await request(port, 'POST', '/kick-mod', {
+        token: 't', broadcasterId: 5, action: 'timeout', username: 'viewer',
+        userId: '777', duration: 61, reason: 'Spam',
+      });
+      assertEqual(res.status, 200);
+      assertEqual(calls, 1);
+    });
+  });
+
   it('converts timeout seconds into kick minutes', async () => {
     let banBody = null;
     stubFetch(async (url, options) => {
@@ -334,7 +354,7 @@ describe('server: kick endpoints', () => {
       method = options.method; return jsonResult({ ok: true });
     });
     await withServer({}, async port => {
-      const res = await request(port, 'POST', '/kick-mod', { token: 't', broadcasterId: 5, username: 'viewer', action: 'unban' });
+      const res = await request(port, 'POST', '/kick-mod', { token: 't', broadcasterId: 5, username: 'viewer', action: 'unban', reason: 'unused' });
       assertEqual(res.status, 200); assertEqual(method, 'DELETE');
     });
   });

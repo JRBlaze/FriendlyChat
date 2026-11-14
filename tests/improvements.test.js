@@ -36,6 +36,103 @@ function kick(a,data={id:90,user_id:3,chatroom:{id:777}}) {
   a.fetch.route('kick.com/api/v2/channels/',()=>({messages:[]}));
 }
 
+describe('app improvements: composer moderation commands',()=> {
+  function send(a,text) {
+    a.type('#send-input',text);
+    a.click('#send-btn');
+    return a.tick(4);
+  }
+  it('routes ban, timeout and unban to the single selected platform with reasons and target IDs',async()=> {
+    const a=await boot(),S=auth(a);
+    S.canModerate.twitch=S.canModerate.kick=true;
+    a.fetch.route('helix/users?login=',()=>({data:[{id:'9'}]}));
+    a.fetch.route('helix/moderation/bans',()=>({data:[]}));
+    a.fetch.route('/kick-mod',()=>({}));
+    a.api().addMsg('kick','viewer','hello',{userId:987});a.api().flushFeed();
+    await send(a,'/ban viewer');
+    assertEqual(a.fetch.callsTo('/moderation/bans').length,0);
+    assertEqual(a.fetch.callsTo('/kick-mod').length,0);
+    S.target=new Set(['twitch']);
+    await send(a,'/BAN @viewer repeated spam');
+    await send(a,'/timeout viewer 50 bad links');
+    await send(a,'/untimeout viewer');
+    const twitch=a.fetch.callsTo('/moderation/bans');
+    assertEqual(twitch.map(r=>r.options.method),['POST','POST','DELETE']);
+    assertEqual(JSON.parse(twitch[0].options.body).data,{user_id:'9',reason:'repeated spam'});
+    assertEqual(JSON.parse(twitch[1].options.body).data,{user_id:'9',duration:50,reason:'bad links'});
+    S.target=new Set(['kick']);
+    await send(a,'/timeout viewer');
+    await send(a,'/ban viewer spam');
+    await send(a,'/unban unknown');
+    const requests=a.fetch.callsTo('/kick-mod').map(r=>JSON.parse(r.options.body));
+    assertEqual(requests.map(r=>r.action),['timeout','ban','unban']);
+    assertEqual(requests[0].duration,600);
+    assertEqual(requests[0].userId,'987');
+    assertEqual(requests[1].reason,'spam');
+    assertEqual(requests[2].userId,undefined);
+    assertEqual(a.fetch.callsTo('helix/chat/messages').length,0);
+    assertEqual(a.fetch.callsTo('/kick-send').length,0);
+    await send(a,'/me says hello');
+    assertEqual(a.fetch.callsTo('/kick-send').length,1);
+  });
+  it('rejects malformed commands and directs Kick role changes to Kick',async()=> {
+    const a=await boot(),S=auth(a);
+    S.target=new Set(['kick']);
+    for(const command of ['/ban','/ban bad/name','/ban viewer '+'x'.repeat(101),
+      '/timeout viewer invalid','/timeout viewer 604801','/unban viewer extra','/mod viewer','/unmod viewer']) {
+      await send(a,command);
+    }
+    S.target=new Set(['twitch']);
+    await send(a,'/ban viewer '+'x'.repeat(501));
+    await send(a,'/timeout viewer 0');
+    await send(a,'/mod viewer');
+    S.target.clear();
+    await send(a,'/unban viewer');
+    a.api().flushFeed();
+    const feed=a.$('#feed').textContent;
+    for(const message of ['Usage: /ban','Usage: /unban','Usage: /timeout','7 days','Creator Dashboard','only the channel owner','Select exactly one']) {
+      assertIncludes(feed,message);
+    }
+    assertEqual(a.fetch.callsTo('/kick-send').length,0);
+    assertEqual(a.fetch.callsTo('/kick-mod').length,0);
+    assertEqual(a.fetch.callsTo('/moderation/moderators').length,0);
+  });
+  it('adds and removes Twitch moderators as owner and reports rejected role changes',async()=> {
+    const a=await boot(),S=auth(a);
+    S.target=new Set(['twitch']);S.canModerate.twitch=true;S.twitchBroadcasterId=S.twitchUserId;
+    a.fetch.route('helix/users?login=',()=>({data:[{id:'9'}]}));
+    let status=204, error={};
+    a.fetch.route('helix/moderation/moderators',()=>a.fetch.json(error,status));
+    await send(a,'/mod viewer');await send(a,'/unmod viewer');
+    const roles=a.fetch.callsTo('/moderation/moderators');
+    assertEqual(roles.map(r=>r.options.method),['POST','DELETE']);
+    assertIncludes(roles[0].url,'broadcaster_id=1&user_id=9');
+    status=401;await send(a,'/mod viewer');
+    status=422;error={message:'remove VIP first'};await send(a,'/mod viewer');
+    status=500;error={};await send(a,'/mod viewer');
+    a.fetch.route('helix/moderation/moderators',()=>({ok:false,status:502,json:async()=>{throw Error('empty');}}));
+    await send(a,'/mod viewer');
+    a.api().flushFeed();
+    const feed=a.$('#feed').textContent;
+    for(const message of ['Added viewer','Removed viewer','reconnect your account','remove VIP first','mod error: 500','mod error: 502']) {
+      assertIncludes(feed,message);
+    }
+    let resolveLookup;
+    a.fetch.route('helix/users?login=',()=>new Promise(resolve=>{resolveLookup=resolve;}));
+    await send(a,'/ban viewer');
+    a.window.eval("leaveCh('twitch')");
+    resolveLookup({data:[{id:'9'}]});
+    await a.tick(4);
+    assertEqual(a.fetch.callsTo('/moderation/bans').length,0);
+    auth(a);S.canModerate.twitch=true;
+    await send(a,'/ban viewer');
+    S.tokens.twitch='different-token';
+    resolveLookup({data:[{id:'9'}]});
+    await a.tick(4);
+    assertEqual(a.fetch.callsTo('/moderation/bans').length,0);
+  });
+});
+
 describe('app improvements: original interface and emote controls',()=> {
   it('keeps identical Twitch/Kick emote names distinct and previews the actual selected image',async()=> {
     const a=await boot(),S=auth(a);
@@ -274,6 +371,40 @@ describe('app improvements: rendering and availability lifecycle',()=> {
 });
 
 describe('app improvements: token validation',()=> {
+  it('notifies Twitch users about the new scope until their account reconnects',async()=> {
+    const a=await boot(),S=a.api().S;
+    const notice=a.$('#twitch-moderator-notice');
+    assert(notice.hidden);
+    a.window.localStorage.setItem('twitch_access_token','old');
+    a.fetch.route('/validate',()=>({client_id:'test',scopes:['chat:read']}));
+    await a.window.eval("validateTwitchSession('old',true)");
+    assert(!notice.hidden);
+    assertIncludes(notice.textContent,'Disconnect and reconnect Twitch in Accounts');
+    await a.window.eval("validateTwitchSession('old')");
+    a.api().flushFeed();
+    assertEqual(a.$$('#feed .sys-msg').filter(row=>row.textContent.includes('to enable /mod and /unmod')).length,1);
+
+    a.window.eval("disconnectPlatform('twitch')");
+    assert(notice.hidden);
+    S.tokens.twitch='new';
+    a.fetch.route('/validate',()=>({client_id:'test',scopes:['channel:manage:moderators']}));
+    await a.window.eval("validateTwitchSession('new')");
+    assert(notice.hidden);
+
+    for(const restore of [true,false]) {
+      let finishJson;
+      a.window.localStorage.setItem('twitch_access_token','new');
+      a.fetch.route('/validate',()=>({ok:true,json:()=>new Promise(resolve=>{finishJson=resolve;})}));
+      const pending=a.window.eval(`validateTwitchSession('new',${restore})`);
+      await a.tick();
+      if(restore) a.window.localStorage.setItem('twitch_access_token','replaced');
+      else S.tokens.twitch='replaced';
+      finishJson({client_id:'test',scopes:[]});
+      await pending;
+      assert(notice.hidden);
+      assertEqual(S.tokens.twitch,restore?'new':'replaced');
+    }
+  });
   it('validates hourly, preserves sessions during outages, and revokes an expired token',async()=> {
     let hourly;
     const a=await boot({browserSetup(window){const original=window.setInterval;window.setInterval=(fn,delay)=>delay===3600000?(hourly=fn,0):original(fn,delay);}});
@@ -335,6 +466,38 @@ describe('app improvements: late responses and failure paths',()=> {
     a.window.WebSocket=original;clock.fire(2000);const ws=a.ws.last();ws.open();
     a.window.eval('connections.twitch.connectedAt=Date.now()-31000');ws.close();clock.fire(2000);
     a.ws.last().close=()=>{throw Error('closed');};a.window.eval("stopConnection('twitch')");assertEqual(S.sockets.twitch,null);
+  });
+  it('collapses only the channel controls and preserves their input values',async()=> {
+    const a=await boot();
+    const controls=a.$('.channel-controls');
+    const summary=controls.querySelector('summary');
+    const topRow=a.$('.topbar-row');
+    assert(controls.open);
+    assert(!controls.contains(topRow));
+    for(const platform of ['twitch','kick','youtube']) {
+      assert(controls.contains(a.$('#cw-'+platform)));
+      a.type('#ci-'+platform,platform+'-channel');
+    }
+    summary.click();
+    assert(!controls.open);
+    summary.click();
+    assert(controls.open);
+    for(const platform of ['twitch','kick','youtube']) {
+      assertEqual(a.$('#ci-'+platform).value,platform+'-channel');
+    }
+  });
+  it('suppresses Kick stream-ended events while retaining other notices',async()=> {
+    const a=await boot();kick(a);
+    a.type('#ci-kick','room');a.click('#jb-kick');await a.tick(3);
+    const ws=a.ws.last();ws.open();
+    for(const name of ['StopStreamBroadcast','StopStreamBroadcastEvent','StreamEnded','StreamEndedEvent','LivestreamEndedEvent','StreamerIsLive','HypeTrainEndedEvent']) {
+      ws.emit(JSON.stringify({event:'App\\Events\\'+name,data:'{}'}));
+    }
+    a.api().flushFeed();
+    const feed=a.$('#feed').textContent;
+    for(const name of ['StopStreamBroadcast','StreamEnded','LivestreamEndedEvent']) assertNotIncludes(feed,name);
+    assertIncludes(feed,'StreamerIsLive');
+    assertIncludes(feed,'Hype Train ended.');
   });
   it('covers fresh Kick owner standing, learned emotes and stable reconnects without granting emote access',async()=> {
     const a=await boot(),clock=timers(a),S=a.api().S;kick(a);S.kickUserLogin='room';S.tokens.kick='t';
