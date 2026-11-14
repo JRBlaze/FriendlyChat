@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  alwaysOnTop: (enabled) => ipcRenderer.invoke('window-always-on-top', enabled),
   fetchKickEmotes: (channel) => ipcRenderer.invoke('kick-fetch-emotes', channel),
   signInToYouTube: () => ipcRenderer.invoke('youtube-sign-in'),
   resolveYouTubeChannel: (query) => ipcRenderer.invoke('youtube-resolve-channel', query),
